@@ -1,0 +1,58 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import AdminLayout from './layouts/AdminLayout';
+import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import ArticlesPage from './pages/ArticlesPage';
+import ArticleEditorPage from './pages/ArticleEditorPage';
+import RevisionsPage from './pages/RevisionsPage';
+import MediaPage from './pages/MediaPage';
+import ProtectedRoute from './components/ProtectedRoute';
+import CommentsPage from './pages/CommentsPage';
+import AdsPage from './pages/AdsPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import HomepagePage from './pages/HomepagePage';
+import HomepagePreviewPage from './pages/HomepagePreviewPage';
+import RequirePermission from './components/RequirePermission';
+import CollectionsPage from './pages/CollectionsPage';
+import SettingsPage from './pages/SettingsPage';
+import CategoriesPage from './pages/CategoriesPage';
+import TagsPage from './pages/TagsPage';
+import LocationsPage from './pages/LocationsPage';
+import UsersPage from './pages/UsersPage';
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <AdminLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<DashboardPage />} />
+        <Route path="articles" element={<ArticlesPage />} />
+        <Route path="articles/new" element={<ArticleEditorPage />} />
+        <Route path="articles/:id/edit" element={<ArticleEditorPage />} />
+        <Route path="articles/:id/revisions" element={<RevisionsPage />} />
+        <Route path="media" element={<MediaPage />} />
+        <Route path="comments" element={<CommentsPage />} />
+        <Route path="ads" element={<AdsPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="categories" element={<CategoriesPage />} />
+        <Route path="tags" element={<TagsPage />} />
+        <Route path="locations" element={<LocationsPage />} />
+        <Route path="users" element={<UsersPage />} />
+        <Route path="homepage" element={<RequirePermission permission="homepage.manage"><HomepagePage /></RequirePermission>} />
+        <Route path="homepage/preview" element={<RequirePermission permission="homepage.manage"><HomepagePreviewPage /></RequirePermission>} />
+        <Route path="collections" element={<CollectionsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+export default App;
