@@ -1,0 +1,212 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-gray-900 antialiased;
+    font-family: 'Inter', 'Hind Siliguri', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Merriweather', 'Hind Siliguri', Georgia, serif;
+  }
+
+  :lang(bn) {
+    font-family: 'Hind Siliguri', 'Noto Sans Bengali', system-ui, sans-serif;
+    line-height: 1.55;
+  }
+  
+  /* Typography utilities */
+  .display-1 {
+    @apply text-[3rem] font-extrabold leading-[1.1] tracking-normal;
+  }
+  
+  .display-2 {
+    @apply text-[2.5rem] font-extrabold leading-[1.1] tracking-normal;
+  }
+  
+  .heading-1 {
+    @apply text-[2.25rem] font-bold leading-[1.2] tracking-normal;
+  }
+  
+  .heading-2 {
+    @apply text-[2rem] font-bold leading-[1.2] tracking-normal;
+  }
+  
+  .section-heading {
+    @apply text-[1.75rem] font-semibold leading-[1.3] tracking-normal;
+  }
+  
+  .card-title {
+    @apply text-[1.5rem] font-semibold leading-[1.3] tracking-normal;
+  }
+  
+  .body-lg {
+    @apply text-[1.25rem] font-normal leading-[1.7];
+  }
+  
+  .body-base {
+    @apply text-[1.125rem] font-normal leading-[1.7];
+  }
+  
+  .body-sm {
+    @apply text-[1rem] font-normal leading-[1.7];
+  }
+  
+  .lead {
+    @apply text-[1.5rem] font-normal leading-[1.6];
+  }
+  
+  .metadata {
+    @apply text-[0.875rem] font-normal leading-[1.6];
+  }
+  
+  .caption {
+    @apply text-[0.75rem] font-normal leading-[1.6];
+  }
+  
+  .nav {
+    @apply text-[0.875rem] font-medium leading-[1.6];
+  }
+  
+  .button-text {
+    @apply text-[0.875rem] font-semibold leading-[1.5];
+  }
+  
+  .input-text {
+    @apply text-[0.875rem] font-normal leading-[1.6];
+  }
+}
+
+@layer components {
+  .container-wide {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .container-narrow {
+    @apply mx-auto max-w-4xl px-4 sm:px-6 lg:px-8;
+  }
+  
+  /* Button variants */
+  .btn-primary {
+    @apply bg-primary-600 text-primary-50 hover:bg-primary-700 focus:bg-primary-700 focus:ring-2 focus:ring-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-neutral-200 text-neutral-800 hover:bg-neutral-300 focus:bg-neutral-300 focus:ring-2 focus:ring-neutral-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+  }
+  
+  .btn-ghost {
+    @apply bg-transparent text-neutral-600 hover:bg-neutral-100 focus:bg-neutral-100 focus:ring-2 focus:ring-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+  }
+  
+  .btn-accent {
+    @apply bg-accent-600 text-accent-50 hover:bg-accent-700 focus:bg-accent-700 focus:ring-2 focus:ring-accent-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+  }
+  
+  .btn-icon {
+    @apply p-2 rounded hover:bg-neutral-100 focus:bg-neutral-100 focus:ring-2 focus:ring-neutral-200 transition-all duration-200;
+  }
+  
+  .btn-icon-active {
+    @apply bg-primary-500 text-primary-50;
+  }
+  
+  /* Badge variants */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider;
+  }
+  
+  .badge-category {
+    @apply bg-primary-500 text-primary-50;
+  }
+  
+  .badge-breaking {
+    @apply bg-accent-600 text-accent-50 motion-safe:animate-pulse;
+  }
+  
+  .badge-neutral {
+    @apply bg-neutral-200 text-neutral-800;
+  }
+  
+  .badge-success {
+    @apply bg-success-500 text-success-50;
+  }
+  
+  .badge-warning {
+    @apply bg-warning-500 text-warning-50;
+  }
+  
+  .badge-error {
+    @apply bg-error-500 text-error-50;
+  }
+  
+  .badge-info {
+    @apply bg-info-500 text-info-50;
+  }
+  
+  /* Divider */
+  .divider {
+    @apply h-px bg-neutral-200 mx-4 my-4;
+  }
+  
+  .divider-accent {
+    @apply h-px bg-accent-200 mx-4 my-4;
+  }
+  
+  /* Skeleton loader */
+  .skeleton {
+    @apply bg-neutral-200 animate-pulse;
+  }
+  
+  .skeleton-text {
+    @apply skeleton h-4 w-full rounded mb-2;
+  }
+  
+  .skeleton-title {
+    @apply skeleton h-6 w-3/4 rounded mb-2;
+  }
+  
+  .skeleton-avatar {
+    @apply skeleton h-8 w-8 rounded-full;
+  }
+  
+  /* Empty state */
+  .empty-state {
+    @apply text-center py-12;
+  }
+  
+  .empty-state-icon {
+    @apply h-12 w-12 text-neutral-400 mx-auto mb-4;
+  }
+  
+  .empty-state-title {
+    @apply text-lg font-medium text-neutral-800 mb-2;
+  }
+  
+  .empty-state-description {
+    @apply text-base text-neutral-500 mb-6 max-w-xl mx-auto;
+  }
+  
+  /* Error state */
+  .error-state {
+    @apply text-center py-12;
+  }
+  
+  .error-state-icon {
+    @apply h-12 w-12 text-error-500 mx-auto mb-4;
+  }
+  
+  .error-state-title {
+    @apply text-lg font-medium text-error-800 mb-2;
+  }
+  
+  .error-state-description {
+    @apply text-base text-neutral-500 mb-6 max-w-xl mx-auto;
+  }
+  
+  .error-state-action {
+    @apply inline-flex items-center px-4 py-2 bg-neutral-100 text-neutral-800 rounded font-medium hover:bg-neutral-200 transition-colors duration-200;
+  }
+}

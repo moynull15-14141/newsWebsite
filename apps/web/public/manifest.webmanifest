@@ -1,0 +1,14 @@
+{
+  "name": "BD News",
+  "short_name": "BD News",
+  "description": "Bangladesh-first news, reporting and analysis.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0f766e",
+  "background_color": "#f8fafc",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
