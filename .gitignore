@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Runtime media uploads (local storage) - never commit user-uploaded files
+uploads/
