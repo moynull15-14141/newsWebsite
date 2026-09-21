@@ -1,0 +1,832 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+enum AccountType {
+  STAFF
+  READER
+}
+
+enum CollectionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum NotificationType {
+  BREAKING_NEWS
+  NEW_ARTICLE
+  RECOMMENDATION
+  SYSTEM
+}
+
+enum SubscriberStatus {
+  PENDING
+  ACTIVE
+  UNSUBSCRIBED
+}
+
+enum HomepageSectionType {
+  HERO
+  LATEST
+  BANGLADESH
+  WORLD
+  POLITICS
+  BUSINESS
+  SPORTS
+  TECHNOLOGY
+  ENTERTAINMENT
+  TRENDING
+  MOST_READ
+  CUSTOM
+}
+
+enum HomepageConfigurationStatus {
+  ACTIVE
+  DRAFT
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR_IN_CHIEF
+  EDITOR
+  REPORTER
+  PHOTOGRAPHER
+  CONTRIBUTOR
+  MODERATOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum LocationType {
+  COUNTRY
+  DIVISION
+  DISTRICT
+  UPAZILA
+}
+
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LocationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TagStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ArticleStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+// ==================== MODELS ====================
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  userRoles               UserRoleAssignment[]
+  authoredArticles        Article[]                  @relation("ArticleAuthor")
+  reviewedArticles        Article[]                  @relation("ArticleReviewer")
+  sessions                Session[]
+  uploadedMedia           Media[]
+  revisedArticles         ArticleRevision[]
+  comments                Comment[]                  @relation("CommentAuthor")
+  moderatedComments       Comment[]                  @relation("CommentModerator")
+  createdAds              Ad[]
+  accountType             AccountType                @default(STAFF) @map("account_type")
+  verifiedAt              DateTime?                  @map("verified_at")
+  readerProfile           ReaderProfile?
+  bookmarks               Bookmark[]
+  notifications           Notification[]
+  notificationPreference  NotificationPreference?
+  createdCollections      EditorialCollection[]
+  articleNotes            ArticleNote[]
+  corrections             ArticleCorrection[]
+  preferenceCategories    ReaderPreferenceCategory[]
+  preferenceLocations     ReaderPreferenceLocation[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  rolePermissions     RolePermission[]
+  userRoleAssignments UserRoleAssignment[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRoleAssignment {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("sessions")
+}
+
+model Location {
+  id          String         @id @default(uuid())
+  name        String
+    slug        String
+  type        LocationType
+  parentId    String?        @map("parent_id")
+  identityKey String         @unique @map("identity_key")
+  status      LocationStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  parent            Location?                  @relation("LocationTree", fields: [parentId], references: [id])
+  children          Location[]                 @relation("LocationTree")
+  articles          Article[]
+  readerPreferences ReaderPreferenceLocation[]
+  homepageSections  HomepageSection[]
+
+  @@unique([type, parentId, slug])
+  @@index([slug])
+  @@index([parentId])
+  @@index([status])
+  @@map("locations")
+}
+
+model Category {
+  id          String         @id @default(uuid())
+  name        String
+  slug        String         @unique
+  description String?
+  parentId    String?        @map("parent_id")
+  status      CategoryStatus @default(ACTIVE)
+  sortOrder   Int            @default(0) @map("sort_order")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  parent            Category?                  @relation("CategoryTree", fields: [parentId], references: [id])
+  children          Category[]                 @relation("CategoryTree")
+  articles          Article[]
+  readerPreferences ReaderPreferenceCategory[]
+  homepageSections  HomepageSection[]
+
+  @@index([slug])
+  @@index([status])
+  @@map("categories")
+}
+
+model Tag {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  status    TagStatus @default(ACTIVE)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  articleTags ArticleTag[]
+
+  @@index([slug])
+  @@map("tags")
+}
+
+model Article {
+  id                String        @id @default(uuid())
+  title             String
+  slug              String        @unique
+  excerpt           String?
+  content           Json?
+  seoTitle          String?       @map("seo_title")
+  seoDescription    String?       @map("seo_description")
+  seoKeywords       String?       @map("seo_keywords")
+  canonicalUrl      String?       @map("canonical_url")
+  noIndex           Boolean       @default(false) @map("no_index")
+  status            ArticleStatus @default(DRAFT)
+  authorId          String        @map("author_id")
+  categoryId        String?       @map("category_id")
+  featuredImageId   String?       @map("featured_image_id")
+  locationId        String?       @map("location_id")
+  publishedAt       DateTime?     @map("published_at")
+  reviewedAt        DateTime?     @map("reviewed_at")
+  reviewedById      String?       @map("reviewed_by_id")
+  archivedAt        DateTime?     @map("archived_at")
+  // Breaking news fields
+  isBreaking        Boolean?      @default(false) @map("is_breaking")
+  breakingStartedAt DateTime?     @map("breaking_started_at")
+  breakingEndsAt    DateTime?     @map("breaking_ends_at")
+  breakingPriority  Int?          @map("breaking_priority")
+  // Scheduling fields
+  scheduledAt       DateTime?     @map("scheduled_at")
+  // View tracking
+  viewCount         Int           @default(0) @map("view_count")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  author             User                @relation("ArticleAuthor", fields: [authorId], references: [id])
+  category           Category?           @relation(fields: [categoryId], references: [id])
+  location           Location?           @relation(fields: [locationId], references: [id])
+  media              Media?              @relation("ArticleFeaturedImage", fields: [featuredImageId], references: [id])
+  reviewedBy         User?               @relation("ArticleReviewer", fields: [reviewedById], references: [id])
+  articleTags        ArticleTag[]
+  views              ArticleView[]
+  revisions          ArticleRevision[]
+  comments           Comment[]
+  bookmarks          Bookmark[]
+  collectionItems    ArticleCollection[]
+  notes              ArticleNote[]
+  corrections        ArticleCorrection[]
+  notifications      Notification[]
+  homepagePlacements HomepagePlacement[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([authorId])
+  @@index([categoryId])
+  @@index([locationId])
+  @@index([featuredImageId])
+  @@index([publishedAt])
+  @@index([createdAt])
+  @@index([isBreaking])
+  @@index([breakingPriority])
+  @@index([scheduledAt])
+  @@index([status, publishedAt])
+  @@index([status, isBreaking])
+  @@map("articles")
+}
+
+model ArticleView {
+  id          String   @id @default(uuid())
+  articleId   String   @map("article_id")
+  sessionId   String?  @map("session_id")
+  fingerprint String?  @map("fingerprint")
+  viewedAt    DateTime @default(now()) @map("viewed_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([viewedAt])
+  @@index([articleId, viewedAt])
+  @@index([fingerprint])
+  @@map("article_views")
+}
+
+model ArticleRevision {
+  id              String   @id @default(uuid())
+  articleId       String   @map("article_id")
+  version         Int
+  title           String
+  excerpt         String?
+  content         Json?
+  slug            String
+  categoryId      String?  @map("category_id")
+  locationId      String?  @map("location_id")
+  featuredImageId String?  @map("featured_image_id")
+  authorId        String   @map("author_id")
+  status          String
+  changedById     String   @map("changed_by_id")
+  changeReason    String?  @map("change_reason")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  changedBy User    @relation(fields: [changedById], references: [id])
+
+  @@unique([articleId, version])
+  @@index([articleId])
+  @@index([changedById])
+  @@index([createdAt])
+  @@map("article_revisions")
+}
+
+model ArticleTag {
+  articleId String   @map("article_id")
+  tagId     String   @map("tag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+  @@map("article_tags")
+}
+
+model Media {
+  id               String   @id @default(uuid())
+  filename         String
+  originalFilename String   @map("original_filename")
+  mimeType         String   @map("mime_type")
+  size             Int
+  width            Int?
+  height           Int?
+  storageKey       String   @unique @map("storage_key")
+  publicUrl        String   @map("public_url")
+  altText          String?  @map("alt_text")
+  caption          String?
+  credit           String?
+  uploadedById     String   @map("uploaded_by_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  uploadedBy       User                  @relation(fields: [uploadedById], references: [id])
+  featuredArticles Article[]             @relation("ArticleFeaturedImage")
+  ads              Ad[]
+  collectionCovers EditorialCollection[]
+}
+
+model ReaderProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique @map("user_id")
+  displayName       String
+  preferredLanguage String   @default("en") @map("preferred_language")
+  avatarMediaId     String?  @map("avatar_media_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reader_profiles")
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  articleId String   @map("article_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, articleId])
+  @@index([userId, createdAt])
+  @@index([articleId])
+  @@map("bookmarks")
+}
+
+model ReaderPreferenceCategory {
+  userId     String   @map("user_id")
+  categoryId String   @map("category_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@index([categoryId])
+  @@map("reader_preference_categories")
+}
+
+model ReaderPreferenceLocation {
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+  @@index([locationId])
+  @@map("reader_preference_locations")
+}
+
+model NotificationPreference {
+  id           String   @id @default(uuid())
+  userId       String   @unique @map("user_id")
+  breakingNews Boolean  @default(true) @map("breaking_news")
+  categoryNews Boolean  @default(true) @map("category_news")
+  locationNews Boolean  @default(true) @map("location_news")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String
+  articleId String?          @map("article_id")
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([articleId])
+  @@map("notifications")
+}
+
+model EditorialCollection {
+  id           String           @id @default(uuid())
+  name         String
+  slug         String           @unique
+  description  String?
+  coverImageId String?          @map("cover_image_id")
+  status       CollectionStatus @default(DRAFT)
+  createdById  String           @map("created_by_id")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  coverImage Media?              @relation(fields: [coverImageId], references: [id])
+  createdBy  User                @relation(fields: [createdById], references: [id])
+  articles   ArticleCollection[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("editorial_collections")
+}
+
+model ArticleCollection {
+  articleId    String   @map("article_id")
+  collectionId String   @map("collection_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  article    Article             @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  collection EditorialCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, collectionId])
+  @@index([collectionId, sortOrder])
+  @@map("article_collections")
+}
+
+/// A section belongs to exactly one HomepageConfiguration (the live ACTIVE one or the editable DRAFT).
+/// `key` is the stable identity inside a configuration and is shared by the ACTIVE and DRAFT copy of
+/// the same section: lower(type) for singleton types, custom-<suffix> for repeatable CUSTOM sections.
+/// `layoutType` holds a validated preset (FEATURED_STACK | THREE_UP | COMPACT_LIST), enforced by the service.
+model HomepageSection {
+  id              String              @id @default(uuid())
+  configurationId String              @map("configuration_id")
+  type            HomepageSectionType
+  key             String
+  title           String
+  enabled         Boolean             @default(true)
+  sortOrder       Int                 @default(0) @map("sort_order")
+  categoryId      String?             @map("category_id")
+  locationId      String?             @map("location_id")
+  maxItems        Int                 @default(4) @map("max_items")
+  layoutType      String              @default("FEATURED_STACK") @map("layout_type")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  configuration HomepageConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade)
+  category      Category?             @relation(fields: [categoryId], references: [id])
+  location      Location?             @relation(fields: [locationId], references: [id])
+  placements    HomepagePlacement[]
+
+  @@index([enabled, sortOrder])
+  @@index([configurationId, sortOrder])
+  @@unique([configurationId, key])
+  @@map("homepage_sections")
+}
+
+/// Homepage configuration boundary. INVARIANT: at most one row per status (unique index on `status`),
+/// so "which homepage is live?" is always the single ACTIVE row. The DRAFT row is the persistent
+/// single working copy; `version` is bumped on every draft mutation (optimistic concurrency) and on
+/// every publish of the ACTIVE row. Publishing copies DRAFT -> ACTIVE inside one transaction.
+model HomepageConfiguration {
+  id          String                      @id @default(uuid())
+  status      HomepageConfigurationStatus @unique
+  version     Int                         @default(1)
+  publishedAt DateTime?                   @map("published_at")
+  createdAt   DateTime                    @default(now()) @map("created_at")
+  updatedAt   DateTime                    @updatedAt @map("updated_at")
+
+  sections HomepageSection[]
+
+  @@map("homepage_configurations")
+}
+
+model HomepagePlacement {
+  sectionId String @map("section_id")
+  articleId String @map("article_id")
+  sortOrder Int    @default(0) @map("sort_order")
+
+  section HomepageSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  article Article         @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([sectionId, articleId])
+  @@index([sectionId, sortOrder])
+  @@map("homepage_placements")
+}
+
+model NewsletterSubscriber {
+  id             String           @id @default(uuid())
+  email          String           @unique
+  status         SubscriberStatus @default(PENDING)
+  subscribedAt   DateTime         @default(now()) @map("subscribed_at")
+  unsubscribedAt DateTime?        @map("unsubscribed_at")
+  verifiedAt     DateTime?        @map("verified_at")
+
+  @@index([status])
+  @@map("newsletter_subscribers")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model ArticleNote {
+  id        String   @id @default(uuid())
+  articleId String   @map("article_id")
+  authorId  String   @map("author_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([articleId, createdAt])
+  @@map("article_notes")
+}
+
+model ArticleCorrection {
+  id            String   @id @default(uuid())
+  articleId     String   @map("article_id")
+  description   String
+  correctedAt   DateTime @default(now()) @map("corrected_at")
+  correctedById String   @map("corrected_by_id")
+
+  article     Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  correctedBy User    @relation(fields: [correctedById], references: [id])
+
+  @@index([articleId, correctedAt])
+  @@map("article_corrections")
+}
+
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@map("platform_settings")
+}
+
+// ==================== PHASE 5 MODELS ====================
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SPAM
+  DELETED
+}
+
+enum AdStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXPIRED
+}
+
+enum AdType {
+  BANNER
+  IMAGE
+  HTML
+}
+
+enum AdSlotName {
+  HEADER_TOP
+  HEADER_BOTTOM
+  HOME_HERO_BELOW
+  HOME_FEED
+  ARTICLE_TOP
+  ARTICLE_MIDDLE
+  ARTICLE_BOTTOM
+  CATEGORY_TOP
+  SIDEBAR
+  FOOTER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  RESOLVED
+}
+
+model Comment {
+  id            String        @id @default(uuid())
+  articleId     String        @map("article_id")
+  userId        String?       @map("user_id")
+  guestName     String?       @map("guest_name")
+  parentId      String?       @map("parent_id")
+  content       String
+  status        CommentStatus @default(PENDING)
+  moderatedAt   DateTime?     @map("moderated_at")
+  moderatedById String?       @map("moderated_by_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  article     Article         @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  user        User?           @relation("CommentAuthor", fields: [userId], references: [id])
+  parent      Comment?        @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[]       @relation("CommentReplies")
+  moderatedBy User?           @relation("CommentModerator", fields: [moderatedById], references: [id])
+  reports     CommentReport[]
+
+  @@index([articleId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([parentId])
+  @@index([userId])
+  @@map("comments")
+}
+
+model CommentReport {
+  id         String       @id @default(uuid())
+  commentId  String       @map("comment_id")
+  reason     String
+  reportedBy String?      @map("reported_by")
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([status])
+  @@map("comment_reports")
+}
+
+model Ad {
+  id           String     @id @default(uuid())
+  name         String
+  type         AdType
+  status       AdStatus   @default(DRAFT)
+  mediaId      String?    @map("media_id")
+  targetUrl    String?    @map("target_url")
+  htmlContent  String?    @map("html_content")
+  slot         AdSlotName
+  priority     Int        @default(0)
+  startAt      DateTime?  @map("start_at")
+  endAt        DateTime?  @map("end_at")
+  deviceTarget String     @default("all") @map("device_target")
+  pageTarget   String?    @map("page_target")
+  categoryId   String?    @map("category_id")
+  locationId   String?    @map("location_id")
+  createdById  String     @map("created_by_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  media       Media?         @relation(fields: [mediaId], references: [id])
+  impressions AdImpression[]
+  clicks      AdClick[]
+
+  @@index([status])
+  @@index([slot])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([status, slot])
+  @@map("ads")
+}
+
+model AdImpression {
+  id        String   @id @default(uuid())
+  adId      String   @map("ad_id")
+  slot      String
+  sessionId String?  @map("session_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ad Ad @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([adId])
+  @@index([createdAt])
+  @@index([adId, createdAt])
+  @@map("ad_impressions")
+}
+
+model AdClick {
+  id        String   @id @default(uuid())
+  adId      String   @map("ad_id")
+  slot      String
+  sessionId String?  @map("session_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ad Ad @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([adId])
+  @@index([createdAt])
+  @@index([adId, createdAt])
+  @@map("ad_clicks")
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(uuid())
+  eventType  String   @map("event_type")
+  articleId  String?  @map("article_id")
+  categoryId String?  @map("category_id")
+  locationId String?  @map("location_id")
+  adId       String?  @map("ad_id")
+  sessionId  String?  @map("session_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([articleId])
+  @@index([categoryId])
+  @@index([locationId])
+  @@index([adId])
+  @@index([eventType, createdAt])
+  @@map("analytics_events")
+}
