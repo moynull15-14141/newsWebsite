@@ -50,4 +50,9 @@ export class PublicArticleQueryDto {
   @IsOptional()
   @IsString()
   locationType?: string;
+
+  /** ISO language code (e.g. "bn", "en"). Unknown/omitted/disabled codes fall back to the default language. */
+  @IsOptional()
+  @IsString()
+  lang?: string;
 }

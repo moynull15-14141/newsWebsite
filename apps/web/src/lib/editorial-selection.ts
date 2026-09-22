@@ -1,4 +1,4 @@
-import type { EditorialArticle, HomepageLayoutPreset } from '@/components/editorial';
+import type { EditorialArticle, HomepageCardVariant, HomepageLayoutPreset } from '@/components/editorial';
 
 /** Self-describing section from GET /public/homepage (`sectionList`). */
 export interface HomepageSectionData {
@@ -6,7 +6,13 @@ export interface HomepageSectionData {
   type: string;
   title: string;
   layout: HomepageLayoutPreset;
+  /** Presentation override; absent on older API responses, where the layout decides. */
+  cardVariant?: HomepageCardVariant;
+  /** Where the section's stories came from. Informational — the articles are already resolved. */
+  sourceType?: string;
   category?: { id: string; name: string; slug: string } | null;
+  tag?: { id: string; name: string; slug: string } | null;
+  location?: { id: string; name: string; slug: string; type: string } | null;
   articles: EditorialArticle[];
 }
 
@@ -26,6 +32,7 @@ export interface HomepageSectionView {
   title: string;
   href?: string;
   layout: HomepageLayoutPreset;
+  cardVariant: HomepageCardVariant;
   articles: EditorialArticle[];
 }
 
@@ -53,8 +60,9 @@ export function selectHomepageSections(data?: HomepageEditorialData): HomepageSe
       .map((section) => ({
         key: section.key,
         title: section.title,
-        href: section.category ? `/category/${section.category.slug}` : categoryTypes.has(section.type) ? `/category/${section.type.toLowerCase()}` : undefined,
+        href: sectionHref(section),
         layout: section.layout,
+        cardVariant: section.cardVariant ?? 'AUTO',
         articles: section.articles,
       }));
   }
@@ -65,8 +73,21 @@ export function selectHomepageSections(data?: HomepageEditorialData): HomepageSe
       title: legacySectionLabels[key] || key,
       href: key === 'custom' || key === 'latest' ? undefined : `/category/${key}`,
       layout: index % 2 === 0 ? ('FEATURED_STACK' as const) : ('THREE_UP' as const),
+      cardVariant: 'AUTO' as const,
       articles,
     }));
+}
+
+/**
+ * "View all" target for a section: whichever taxonomy it is bound to, falling back to the category route
+ * implied by a standard section type. All three routes already exist on the public site.
+ */
+function sectionHref(section: HomepageSectionData): string | undefined {
+  if (section.category) return `/category/${section.category.slug}`;
+  if (section.tag) return `/tag/${section.tag.slug}`;
+  if (section.location) return `/location/${section.location.slug}`;
+  if (categoryTypes.has(section.type)) return `/category/${section.type.toLowerCase()}`;
+  return undefined;
 }
 
 export function selectHomepageStories(data?: HomepageEditorialData) {

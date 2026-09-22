@@ -1,16 +1,22 @@
 import { ineligibleReason, IneligibleReason } from '../articles/public-eligibility';
 import {
   HERO_MAX_PLACEMENTS,
+  isCardVariant,
   isLayoutPreset,
+  isManualSource,
   isRepeatableType,
   MAX_SECTION_ITEMS,
+  REQUIRED_SOURCE_LINK,
 } from './homepage.constants';
 
 export interface HomepageIssue {
   code:
     | 'EMPTY_TITLE'
     | 'INVALID_LAYOUT'
+    | 'INVALID_CARD_VARIANT'
     | 'INVALID_MAX_ITEMS'
+    | 'INVALID_SOURCE_TYPE'
+    | 'SOURCE_LINK_MISSING'
     | 'PLACEMENT_LIMIT_EXCEEDED'
     | 'HERO_PLACEMENT_LIMIT'
     | 'HERO_MULTIPLE'
@@ -30,6 +36,12 @@ export interface ValidatableSection {
   title: string;
   layoutType: string;
   maxItems: number;
+  /** Absent on legacy callers/fixtures; treated as MANUAL, which is the column default. */
+  sourceType?: string;
+  cardVariant?: string;
+  categoryId?: string | null;
+  tagId?: string | null;
+  locationId?: string | null;
   placements: Array<{ articleId: string; article: { status: string; publishedAt?: Date | string | null } | null }>;
 }
 
@@ -66,11 +78,33 @@ export function validateHomepageSections(sections: ValidatableSection[], now: Da
 
   for (const section of sections) {
     const at = { sectionKey: section.key };
+    const sourceType = section.sourceType ?? 'MANUAL';
     if (!section.title.trim()) issues.push({ code: 'EMPTY_TITLE', message: 'Section title must not be empty.', ...at });
     if (!isLayoutPreset(section.layoutType)) issues.push({ code: 'INVALID_LAYOUT', message: `Unknown layout preset "${section.layoutType}".`, ...at });
+    if (section.cardVariant !== undefined && !isCardVariant(section.cardVariant)) {
+      issues.push({ code: 'INVALID_CARD_VARIANT', message: `Unknown card presentation "${section.cardVariant}".`, ...at });
+    }
     if (!Number.isInteger(section.maxItems) || section.maxItems < 1 || section.maxItems > MAX_SECTION_ITEMS) {
       issues.push({ code: 'INVALID_MAX_ITEMS', message: `maxItems must be between 1 and ${MAX_SECTION_ITEMS}.`, ...at });
     }
+
+    // An automatic source must have the link it queries by, otherwise it would silently render nothing.
+    if (!(sourceType in REQUIRED_SOURCE_LINK)) {
+      issues.push({ code: 'INVALID_SOURCE_TYPE', message: `Unknown content source "${sourceType}".`, ...at });
+    } else {
+      const required = REQUIRED_SOURCE_LINK[sourceType as keyof typeof REQUIRED_SOURCE_LINK];
+      if (required && !section[required]) {
+        issues.push({
+          code: 'SOURCE_LINK_MISSING',
+          message: `A ${sourceType} section needs a ${required === 'categoryId' ? 'category' : required === 'tagId' ? 'tag' : 'location'} to pull stories from.`,
+          ...at,
+        });
+      }
+    }
+
+    // Placement rules only apply to MANUAL sections. Automatic sources hold no placements (the service
+    // clears them when the source changes) and are capped at read time by the resolver.
+    if (!isManualSource(sourceType)) continue;
 
     if (section.placements.length > section.maxItems) {
       issues.push({ code: 'PLACEMENT_LIMIT_EXCEEDED', message: `${section.placements.length} articles placed but the section shows at most ${section.maxItems}.`, ...at });
@@ -111,9 +145,7 @@ export function describeIneligibility(reason: IneligibleReason): string {
 
 /** Stable fingerprint of a configuration's content (ignores ids/timestamps) to detect unpublished changes. */
 export function configurationSignature(
-  sections: Array<
-    ValidatableSection & { enabled: boolean; categoryId: string | null; locationId: string | null }
-  >,
+  sections: Array<ValidatableSection & { enabled: boolean }>,
 ): string {
   return JSON.stringify(
     sections.map((section) => [
@@ -123,8 +155,11 @@ export function configurationSignature(
       section.enabled,
       section.maxItems,
       section.layoutType,
-      section.categoryId,
-      section.locationId,
+      section.cardVariant ?? 'AUTO',
+      section.sourceType ?? 'MANUAL',
+      section.categoryId ?? null,
+      section.locationId ?? null,
+      section.tagId ?? null,
       section.placements.map((placement) => placement.articleId),
     ]),
   );

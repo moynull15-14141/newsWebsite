@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isPubliclyEligible } from '../articles/public-eligibility';
 import { PublicService } from '../public/public.service';
+import { LanguagesService } from '../languages/languages.service';
 import {
   CreateHomepageSectionDto,
   ReorderHomepageSectionsDto,
@@ -11,12 +12,17 @@ import {
   UpdateHomepageSectionDto,
 } from './dto/homepage.dto';
 import {
+  DEFAULT_CARD_VARIANT,
   DEFAULT_LAYOUT_PRESET,
   DEFAULT_SECTION_ITEMS,
   HERO_MAX_PLACEMENTS,
+  HOMEPAGE_CARD_VARIANTS,
   HOMEPAGE_LAYOUT_PRESETS,
+  HOMEPAGE_SOURCE_TYPES,
+  isManualSource,
   isRepeatableType,
   MAX_SECTIONS_PER_CONFIGURATION,
+  REQUIRED_SOURCE_LINK,
   singletonKey,
 } from './homepage.constants';
 import { loadConfiguredSections } from './homepage.serializer';
@@ -46,6 +52,8 @@ const ARTICLE_SUMMARY_SELECT = {
 const SECTION_ORDER = [{ sortOrder: 'asc' as const }, { id: 'asc' as const }];
 const SECTION_VIEW_INCLUDE = {
   category: { select: { id: true, name: true, slug: true } },
+  tag: { select: { id: true, name: true, slug: true } },
+  location: { select: { id: true, name: true, slug: true, type: true } },
   placements: { orderBy: { sortOrder: 'asc' as const }, include: { article: { select: ARTICLE_SUMMARY_SELECT } } },
 } satisfies Prisma.HomepageSectionInclude;
 
@@ -72,6 +80,7 @@ export class HomepageService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly publicService: PublicService,
+    private readonly languagesService: LanguagesService,
   ) {}
 
   // ------------------------------------------------------------------ reads
@@ -102,11 +111,13 @@ export class HomepageService {
   /**
    * Renders the DRAFT with the same composition as the public homepage (same serializer, same fallback,
    * trending/most-read/breaking stay algorithmic). Only reachable through the protected controller.
+   * `langCode` lets an editor preview a specific language; omitted falls back to the platform default.
    */
-  async previewDraft() {
+  async previewDraft(langCode?: string) {
     await this.prisma.$transaction((tx) => this.ensureDraft(tx), TX_OPTIONS);
     const { configuration, sections } = await loadConfiguredSections(this.prisma, 'DRAFT');
-    const content = await this.publicService.buildHomepage(sections);
+    const language = await this.languagesService.resolveRequested(langCode);
+    const content = await this.publicService.buildHomepage(sections, new Date(), language);
     return {
       ...content,
       preview: {
@@ -133,7 +144,13 @@ export class HomepageService {
           dto.type === 'HERO' ? 'The draft already has a HERO section.' : `The draft already has a ${dto.type} section.`,
         );
       }
-      await this.assertLinksExist(tx, dto.categoryId, dto.locationId);
+      await this.assertLinksExist(tx, dto.categoryId, dto.locationId, dto.tagId);
+      const sourceType = dto.sourceType ?? 'MANUAL';
+      this.assertSourceLink(sourceType, {
+        categoryId: dto.categoryId ?? null,
+        locationId: dto.locationId ?? null,
+        tagId: dto.tagId ?? null,
+      });
 
       await tx.homepageSection.create({
         data: {
@@ -143,10 +160,13 @@ export class HomepageService {
           title: dto.title,
           enabled: dto.enabled ?? true,
           sortOrder: existing.length,
+          sourceType,
           categoryId: dto.categoryId ?? null,
           locationId: dto.locationId ?? null,
+          tagId: dto.tagId ?? null,
           maxItems: dto.type === 'HERO' ? HERO_MAX_PLACEMENTS : (dto.maxItems ?? DEFAULT_SECTION_ITEMS),
           layoutType: dto.layoutType ?? DEFAULT_LAYOUT_PRESET,
+          cardVariant: dto.cardVariant ?? DEFAULT_CARD_VARIANT,
         },
       });
       return this.buildDraftView(tx, draft.id);
@@ -161,23 +181,44 @@ export class HomepageService {
       if (dto.title !== undefined) data.title = dto.title;
       if (dto.enabled !== undefined) data.enabled = dto.enabled;
       if (dto.layoutType !== undefined) data.layoutType = dto.layoutType;
+      if (dto.cardVariant !== undefined) data.cardVariant = dto.cardVariant;
+
+      // Resulting source configuration: whatever the DTO changes, falling back to what is stored.
+      const nextSourceType = dto.sourceType ?? section.sourceType;
+      const nextLinks = {
+        categoryId: dto.categoryId !== undefined ? dto.categoryId : section.categoryId,
+        locationId: dto.locationId !== undefined ? dto.locationId : section.locationId,
+        tagId: dto.tagId !== undefined ? dto.tagId : section.tagId,
+      };
+      this.assertSourceLink(nextSourceType, nextLinks);
+      if (dto.sourceType !== undefined) data.sourceType = dto.sourceType;
+
       if (dto.maxItems !== undefined) {
         if (section.type === 'HERO' && dto.maxItems !== HERO_MAX_PLACEMENTS) {
           throw this.badRequest('HERO_PLACEMENT_LIMIT', `The HERO section always shows exactly ${HERO_MAX_PLACEMENTS} article.`);
         }
-        const placed = await tx.homepagePlacement.count({ where: { sectionId: id } });
-        if (dto.maxItems < placed) {
-          throw this.badRequest('PLACEMENT_LIMIT_EXCEEDED', `${placed} articles are placed in this section; remove some before lowering maxItems to ${dto.maxItems}.`);
+        // Only MANUAL sections hold placements, so only they can be over their new limit.
+        if (isManualSource(nextSourceType)) {
+          const placed = await tx.homepagePlacement.count({ where: { sectionId: id } });
+          if (dto.maxItems < placed) {
+            throw this.badRequest('PLACEMENT_LIMIT_EXCEEDED', `${placed} articles are placed in this section; remove some before lowering maxItems to ${dto.maxItems}.`);
+          }
         }
         data.maxItems = dto.maxItems;
       }
-      if (dto.categoryId !== undefined || dto.locationId !== undefined) {
-        await this.assertLinksExist(tx, dto.categoryId, dto.locationId);
+      if (dto.categoryId !== undefined || dto.locationId !== undefined || dto.tagId !== undefined) {
+        await this.assertLinksExist(tx, dto.categoryId, dto.locationId, dto.tagId);
         if (dto.categoryId !== undefined) data.category = dto.categoryId ? { connect: { id: dto.categoryId } } : { disconnect: true };
         if (dto.locationId !== undefined) data.location = dto.locationId ? { connect: { id: dto.locationId } } : { disconnect: true };
+        if (dto.tagId !== undefined) data.tag = dto.tagId ? { connect: { id: dto.tagId } } : { disconnect: true };
       }
 
       await tx.homepageSection.update({ where: { id }, data });
+      // Leaving MANUAL makes placements dead data that would reappear if the editor switched back, so
+      // drop them: the section is now defined entirely by its query.
+      if (!isManualSource(nextSourceType) && isManualSource(section.sourceType)) {
+        await tx.homepagePlacement.deleteMany({ where: { sectionId: id } });
+      }
       return this.buildDraftView(tx, draft.id);
     });
   }
@@ -220,6 +261,13 @@ export class HomepageService {
   async setPlacements(sectionId: string, dto: SetHomepagePlacementsDto) {
     return this.mutateDraft(dto.expectedVersion, async (tx, draft) => {
       const section = await this.findDraftSection(tx, draft.id, sectionId);
+      if (!isManualSource(section.sourceType)) {
+        throw this.badRequest(
+          'SECTION_NOT_MANUAL',
+          `This section pulls its stories automatically (${section.sourceType}). Switch it to manual selection to pick stories yourself.`,
+          { sourceType: section.sourceType },
+        );
+      }
       const articleIds = dto.articleIds;
       const articles = articleIds.length
         ? await tx.article.findMany({ where: { id: { in: articleIds } }, select: ARTICLE_SUMMARY_SELECT })
@@ -343,10 +391,13 @@ export class HomepageService {
           title: section.title,
           enabled: section.enabled,
           sortOrder: index,
+          sourceType: section.sourceType,
           categoryId: section.categoryId,
           locationId: section.locationId,
+          tagId: section.tagId,
           maxItems: section.maxItems,
           layoutType: section.layoutType,
+          cardVariant: section.cardVariant,
           placements: { create: section.placements.map((placement, position) => ({ articleId: placement.articleId, sortOrder: position })) },
         },
       });
@@ -359,12 +410,30 @@ export class HomepageService {
     return section;
   }
 
-  private async assertLinksExist(tx: Tx, categoryId?: string | null, locationId?: string | null) {
+  private async assertLinksExist(tx: Tx, categoryId?: string | null, locationId?: string | null, tagId?: string | null) {
     if (categoryId && !(await tx.category.findUnique({ where: { id: categoryId }, select: { id: true } }))) {
       throw this.badRequest('CATEGORY_NOT_FOUND', 'The selected category does not exist.');
     }
     if (locationId && !(await tx.location.findUnique({ where: { id: locationId }, select: { id: true } }))) {
       throw this.badRequest('LOCATION_NOT_FOUND', 'The selected location does not exist.');
+    }
+    if (tagId && !(await tx.tag.findUnique({ where: { id: tagId }, select: { id: true } }))) {
+      throw this.badRequest('TAG_NOT_FOUND', 'The selected tag does not exist.');
+    }
+  }
+
+  /**
+   * An automatic source is only meaningful with the link it queries by. Rejected up front (400) so the
+   * editor is told immediately instead of saving a section that would silently render nothing.
+   */
+  private assertSourceLink(
+    sourceType: string,
+    links: { categoryId: string | null; locationId: string | null; tagId: string | null },
+  ) {
+    const required = REQUIRED_SOURCE_LINK[sourceType as keyof typeof REQUIRED_SOURCE_LINK];
+    if (required && !links[required]) {
+      const what = required === 'categoryId' ? 'category' : required === 'tagId' ? 'tag' : 'location';
+      throw this.badRequest('SOURCE_LINK_MISSING', `Choose a ${what} for this ${sourceType} section.`, { sourceType, required });
     }
   }
 
@@ -380,6 +449,8 @@ export class HomepageService {
       version: draft.version,
       updatedAt: draft.updatedAt,
       layoutPresets: [...HOMEPAGE_LAYOUT_PRESETS],
+      cardVariants: [...HOMEPAGE_CARD_VARIANTS],
+      sourceTypes: [...HOMEPAGE_SOURCE_TYPES],
       hasUnpublishedChanges: configurationSignature(sections) !== configurationSignature(activeSections),
       publishable: issues.length === 0,
       issues,
@@ -398,9 +469,14 @@ export class HomepageService {
       sortOrder: section.sortOrder,
       maxItems: section.maxItems,
       layoutType: section.layoutType,
+      cardVariant: section.cardVariant,
+      sourceType: section.sourceType,
       categoryId: section.categoryId,
       category: section.category,
       locationId: section.locationId,
+      location: section.location,
+      tagId: section.tagId,
+      tag: section.tag,
       updatedAt: section.updatedAt,
       placements: section.placements.map((placement) => ({
         articleId: placement.articleId,

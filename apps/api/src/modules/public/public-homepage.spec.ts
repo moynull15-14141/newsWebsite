@@ -1,4 +1,4 @@
-import { FakeHomepagePrisma } from '../homepage/homepage-prisma.testkit';
+import { FakeHomepagePrisma, fakeLanguagesService } from '../homepage/homepage-prisma.testkit';
 import { serializeHomepageSections } from '../homepage/homepage.serializer';
 import { PublicService } from './public.service';
 
@@ -14,7 +14,7 @@ function setup() {
   const trending = { getTrending: jest.fn().mockResolvedValue([{ id: 'trending-algo' }]) };
   const mostRead = { getMostRead: jest.fn().mockResolvedValue([{ id: 'most-read-algo' }]) };
   const breaking = { getActiveBreakingNews: jest.fn().mockResolvedValue([{ id: 'breaking-algo' }]) };
-  const service = new PublicService(db as any, {} as any, trending as any, mostRead as any, breaking as any);
+  const service = new PublicService(db as any, {} as any, trending as any, mostRead as any, breaking as any, fakeLanguagesService() as any);
 
   const active = (section: Parameters<FakeHomepagePrisma['seedSection']>[1]) => db.seedSection('cfg-active', section);
   const draft = (section: Parameters<FakeHomepagePrisma['seedSection']>[1]) => db.seedSection('cfg-draft', section);
@@ -68,19 +68,25 @@ describe('PublicService.getHomepageData (configured homepage)', () => {
     expect(ids(data.sections.world)).toEqual(['a6', 'a5']);
   });
 
-  it('exposes the section metadata contract: key, type, title, layout preset and category', async () => {
+  it('exposes the section metadata contract: identity, presentation, source links and articles', async () => {
     const { service, active } = setup();
     active({ key: 'bangladesh', type: 'BANGLADESH', title: 'বাংলাদেশ', maxItems: 4, layoutType: 'THREE_UP', categoryId: 'cat-bd', articleIds: ['a1', 'a2'] });
 
     const data: any = await service.getHomepageData();
 
-    expect(Object.keys(data.sectionList[0]).sort()).toEqual(['articles', 'category', 'key', 'layout', 'title', 'type']);
+    expect(Object.keys(data.sectionList[0]).sort()).toEqual([
+      'articles', 'cardVariant', 'category', 'key', 'layout', 'location', 'sourceType', 'tag', 'title', 'type',
+    ]);
     expect(data.sectionList[0]).toMatchObject({
       key: 'bangladesh',
       type: 'BANGLADESH',
       title: 'বাংলাদেশ',
       layout: 'THREE_UP',
+      cardVariant: 'AUTO',
+      sourceType: 'MANUAL',
       category: { id: 'cat-bd', name: 'Bangladesh', slug: 'bangladesh' },
+      tag: null,
+      location: null,
     });
     // No internal identifiers leak.
     expect(data.sectionList[0]).not.toHaveProperty('id');
@@ -191,17 +197,31 @@ describe('PublicService.getHomepageData (configured homepage)', () => {
 
     it('degrades an unknown stored layout to the default preset instead of leaking it', async () => {
       const { service, active } = setup();
-      active({ key: 'latest', type: 'LATEST', title: 'Latest', maxItems: 3, layoutType: 'GRID', articleIds: ['a1'] });
+      active({ key: 'latest', type: 'LATEST', title: 'Latest', maxItems: 3, layoutType: 'MOSAIC_XL', articleIds: ['a1'] });
       const data: any = await service.getHomepageData();
       expect(data.sectionList[0].layout).toBe('FEATURED_STACK');
     });
 
+    it('degrades an unknown stored card variant to AUTO instead of leaking it', async () => {
+      const { service, active } = setup();
+      active({ key: 'latest', type: 'LATEST', title: 'Latest', maxItems: 3, cardVariant: 'holographic', articleIds: ['a1'] });
+      const data: any = await service.getHomepageData();
+      expect(data.sectionList[0].cardVariant).toBe('AUTO');
+    });
+
     it('first HERO wins if legacy data somehow holds two', () => {
       const article = (id: string) => ({ id, status: 'PUBLISHED', publishedAt: PAST });
-      const result = serializeHomepageSections([
-        { key: 'hero', type: 'HERO', title: 'A', enabled: true, maxItems: 1, layoutType: 'FEATURED_STACK', placements: [{ article: article('first') }] },
-        { key: 'hero-2', type: 'HERO', title: 'B', enabled: true, maxItems: 1, layoutType: 'FEATURED_STACK', placements: [{ article: article('second') }] },
+      const resolved = new Map<string, any[]>([
+        ['s1', [article('first')]],
+        ['s2', [article('second')]],
       ]);
+      const result = serializeHomepageSections(
+        [
+          { id: 's1', key: 'hero', type: 'HERO', title: 'A', enabled: true, maxItems: 1, layoutType: 'FEATURED_STACK' },
+          { id: 's2', key: 'hero-2', type: 'HERO', title: 'B', enabled: true, maxItems: 1, layoutType: 'FEATURED_STACK' },
+        ],
+        resolved,
+      );
       expect(result.hero.id).toBe('first');
       expect(result.sectionList).toEqual([]);
     });
@@ -219,9 +239,10 @@ describe('PublicService.getHomepageData (configured homepage)', () => {
       expect(data.trending).toEqual([{ id: 'trending-algo' }]);
       expect(data.mostRead).toEqual([{ id: 'most-read-algo' }]);
       expect(data.breakingNews).toEqual([{ id: 'breaking-algo' }]);
-      expect(trending.getTrending).toHaveBeenCalledWith({ limit: 6 });
-      expect(mostRead.getMostRead).toHaveBeenCalledWith({ limit: 6, window: '24h' });
-      expect(breaking.getActiveBreakingNews).toHaveBeenCalledWith(5);
+      const language = { id: 'lang-bn', code: 'bn', isDefault: true };
+      expect(trending.getTrending).toHaveBeenCalledWith({ limit: 6, language });
+      expect(mostRead.getMostRead).toHaveBeenCalledWith({ limit: 6, window: '24h', language });
+      expect(breaking.getActiveBreakingNews).toHaveBeenCalledWith(5, language);
     });
   });
 

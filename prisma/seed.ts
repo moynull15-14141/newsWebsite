@@ -114,6 +114,25 @@ async function main() {
     console.log(`  ✓ Role permissions: ${roleName} (${permNames.length} permissions)`);
   }
 
+  // ==================== LANGUAGES ====================
+  console.log('\n🌐 Seeding languages...');
+  const languageData = [
+    { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', direction: 'ltr', isDefault: true, sortOrder: 0 },
+    { code: 'en', name: 'English', nativeName: 'English', direction: 'ltr', isDefault: false, sortOrder: 1 },
+  ];
+  const languages: Record<string, string> = {};
+  for (const lang of languageData) {
+    const l = await prisma.language.upsert({
+      where: { code: lang.code },
+      update: { name: lang.name, nativeName: lang.nativeName, isDefault: lang.isDefault, sortOrder: lang.sortOrder },
+      create: lang,
+    });
+    languages[lang.code] = l.id;
+    console.log(`  ✓ Language: ${lang.name} (${lang.nativeName})`);
+  }
+  const bnLanguageId = languages['bn'];
+  const enLanguageId = languages['en'];
+
   // ==================== LOCATIONS (BANGLADESH) ====================
   console.log('\n🌍 Seeding locations...');
 
@@ -193,28 +212,122 @@ async function main() {
     (await prisma.location.findFirst({ where: { slug, type: LocationType.DIVISION } })) ||
     (await prisma.location.findFirst({ where: { slug, type: LocationType.COUNTRY } }));
 
+  // Localized (Bangla) names for Bangladesh and its divisions — the base .name/.slug stay exactly as
+  // seeded above (unchanged); a translation only adds what is DISPLAYED, never a second location.
+  console.log('\n🌐 Seeding Bangladesh location names (বাংলা)...');
+  const bangladeshNameBn: Record<string, string> = {
+    bangladesh: 'বাংলাদেশ',
+    barisal: 'বরিশাল',
+    chattogram: 'চট্টগ্রাম',
+    dhaka: 'ঢাকা',
+    khulna: 'খুলনা',
+    mymensingh: 'ময়মনসিংহ',
+    rajshahi: 'রাজশাহী',
+    rangpur: 'রংপুর',
+    sylhet: 'সিলেট',
+  };
+  for (const [slug, name] of Object.entries(bangladeshNameBn)) {
+    const location = slug === 'bangladesh' ? bangladesh : await prisma.location.findFirst({ where: { slug, type: LocationType.DIVISION } });
+    if (!location) continue;
+    await prisma.locationTranslation.upsert({
+      where: { locationId_languageId: { locationId: location.id, languageId: bnLanguageId } },
+      update: { name },
+      create: { locationId: location.id, languageId: bnLanguageId, name },
+    });
+  }
+  console.log(`  ✓ Localized ${Object.keys(bangladeshNameBn).length} Bangladesh location names`);
+
+  // ==================== GLOBAL LOCATIONS ====================
+  // Bangladesh above is untouched — these are additional, separate top-level/nested locations so the
+  // platform can also cover world news. A modest set on purpose (Part 26: don't overpopulate).
+  console.log('\n🌍 Seeding global locations...');
+
+  const continentData = [
+    { slug: 'asia', name: 'Asia', nameBn: 'এশিয়া' },
+    { slug: 'europe', name: 'Europe', nameBn: 'ইউরোপ' },
+    { slug: 'north-america', name: 'North America', nameBn: 'উত্তর আমেরিকা' },
+  ];
+  const continentIds: Record<string, string> = {};
+  for (const c of continentData) {
+    const row = await prisma.location.upsert({
+      where: { identityKey: `CONTINENT:root:${c.slug}` },
+      update: {},
+      create: { name: c.name, slug: c.slug, type: LocationType.CONTINENT, identityKey: `CONTINENT:root:${c.slug}`, status: 'ACTIVE' },
+    });
+    continentIds[c.slug] = row.id;
+    await prisma.locationTranslation.upsert({
+      where: { locationId_languageId: { locationId: row.id, languageId: bnLanguageId } },
+      update: { name: c.nameBn },
+      create: { locationId: row.id, languageId: bnLanguageId, name: c.nameBn },
+    });
+    console.log(`  ✓ Continent: ${c.name}`);
+  }
+
+  const countryData = [
+    { slug: 'india', name: 'India', nameBn: 'ভারত', continent: 'asia', countryCode: 'IN' },
+    { slug: 'china', name: 'China', nameBn: 'চীন', continent: 'asia', countryCode: 'CN' },
+    { slug: 'united-kingdom', name: 'United Kingdom', nameBn: 'যুক্তরাজ্য', continent: 'europe', countryCode: 'GB' },
+    { slug: 'united-states', name: 'United States', nameBn: 'যুক্তরাষ্ট্র', continent: 'north-america', countryCode: 'US' },
+  ];
+  const countryIds: Record<string, string> = {};
+  for (const c of countryData) {
+    const parentId = continentIds[c.continent];
+    const row = await prisma.location.upsert({
+      where: { identityKey: `COUNTRY:${parentId}:${c.slug}` },
+      update: {},
+      create: { name: c.name, slug: c.slug, type: LocationType.COUNTRY, parentId, identityKey: `COUNTRY:${parentId}:${c.slug}`, countryCode: c.countryCode, status: 'ACTIVE' },
+    });
+    countryIds[c.slug] = row.id;
+    await prisma.locationTranslation.upsert({
+      where: { locationId_languageId: { locationId: row.id, languageId: bnLanguageId } },
+      update: { name: c.nameBn },
+      create: { locationId: row.id, languageId: bnLanguageId, name: c.nameBn },
+    });
+    console.log(`  ✓ Country: ${c.name}`);
+  }
+
+  const regionData = [
+    { slug: 'delhi', name: 'Delhi', nameBn: 'দিল্লি', type: LocationType.STATE, parent: 'india' as const, parentKind: 'country' as const },
+    { slug: 'london', name: 'London', nameBn: 'লন্ডন', type: LocationType.CITY, parent: 'united-kingdom' as const, parentKind: 'country' as const },
+    { slug: 'new-york', name: 'New York', nameBn: 'নিউ ইয়র্ক', type: LocationType.CITY, parent: 'united-states' as const, parentKind: 'country' as const },
+  ];
+  for (const r of regionData) {
+    const parentId = countryIds[r.parent];
+    const row = await prisma.location.upsert({
+      where: { identityKey: `${r.type}:${parentId}:${r.slug}` },
+      update: {},
+      create: { name: r.name, slug: r.slug, type: r.type, parentId, identityKey: `${r.type}:${parentId}:${r.slug}`, status: 'ACTIVE' },
+    });
+    await prisma.locationTranslation.upsert({
+      where: { locationId_languageId: { locationId: row.id, languageId: bnLanguageId } },
+      update: { name: r.nameBn },
+      create: { locationId: row.id, languageId: bnLanguageId, name: r.nameBn },
+    });
+    console.log(`  ✓ ${r.type === LocationType.STATE ? 'State' : 'City'}: ${r.name}`);
+  }
+
   // ==================== CATEGORIES ====================
   console.log('\n📂 Seeding categories...');
   const categoryData = [
-    { name: 'Bangladesh', slug: 'bangladesh', sortOrder: 1 },
-    { name: 'World', slug: 'world', sortOrder: 2 },
-    { name: 'Politics', slug: 'politics', sortOrder: 3 },
-    { name: 'Business', slug: 'business', sortOrder: 4 },
-    { name: 'Economy', slug: 'economy', sortOrder: 5 },
-    { name: 'Sports', slug: 'sports', sortOrder: 6 },
-    { name: 'Technology', slug: 'technology', sortOrder: 7 },
-    { name: 'Entertainment', slug: 'entertainment', sortOrder: 8 },
-    { name: 'Education', slug: 'education', sortOrder: 9 },
-    { name: 'Health', slug: 'health', sortOrder: 10 },
-    { name: 'Crime', slug: 'crime', sortOrder: 11 },
-    { name: 'Lifestyle', slug: 'lifestyle', sortOrder: 12 },
-    { name: 'Travel', slug: 'travel', sortOrder: 13 },
-    { name: 'Science', slug: 'science', sortOrder: 14 },
-    { name: 'Religion', slug: 'religion', sortOrder: 15 },
+    { name: 'Bangladesh', slug: 'bangladesh', sortOrder: 1, nameBn: 'বাংলাদেশ' },
+    { name: 'World', slug: 'world', sortOrder: 2, nameBn: 'বিশ্ব' },
+    { name: 'Politics', slug: 'politics', sortOrder: 3, nameBn: 'রাজনীতি' },
+    { name: 'Business', slug: 'business', sortOrder: 4, nameBn: 'ব্যবসা' },
+    { name: 'Economy', slug: 'economy', sortOrder: 5, nameBn: 'অর্থনীতি' },
+    { name: 'Sports', slug: 'sports', sortOrder: 6, nameBn: 'খেলা' },
+    { name: 'Technology', slug: 'technology', sortOrder: 7, nameBn: 'প্রযুক্তি' },
+    { name: 'Entertainment', slug: 'entertainment', sortOrder: 8, nameBn: 'বিনোদন' },
+    { name: 'Education', slug: 'education', sortOrder: 9, nameBn: 'শিক্ষা' },
+    { name: 'Health', slug: 'health', sortOrder: 10, nameBn: 'স্বাস্থ্য' },
+    { name: 'Crime', slug: 'crime', sortOrder: 11, nameBn: 'অপরাধ' },
+    { name: 'Lifestyle', slug: 'lifestyle', sortOrder: 12, nameBn: 'জীবনযাপন' },
+    { name: 'Travel', slug: 'travel', sortOrder: 13, nameBn: 'ভ্রমণ' },
+    { name: 'Science', slug: 'science', sortOrder: 14, nameBn: 'বিজ্ঞান' },
+    { name: 'Religion', slug: 'religion', sortOrder: 15, nameBn: 'ধর্ম' },
   ];
 
   for (const cat of categoryData) {
-    await prisma.category.upsert({
+    const created = await prisma.category.upsert({
       where: { slug: cat.slug },
       update: { sortOrder: cat.sortOrder },
       create: {
@@ -224,24 +337,33 @@ async function main() {
         sortOrder: cat.sortOrder,
       },
     });
-    console.log(`  ✓ Category: ${cat.name}`);
+    // Localized names: bn gets the real Bangla word; en is recorded explicitly too (not just implied
+    // by the base .name) so both languages go through the same translation relationship.
+    for (const [languageId, name] of [[bnLanguageId, cat.nameBn], [enLanguageId, cat.name]] as const) {
+      await prisma.categoryTranslation.upsert({
+        where: { categoryId_languageId: { categoryId: created.id, languageId } },
+        update: { name },
+        create: { categoryId: created.id, languageId, name, slug: cat.slug },
+      });
+    }
+    console.log(`  ✓ Category: ${cat.name} (${cat.nameBn})`);
   }
 
   // ==================== TAGS ====================
   console.log('\n🏷️  Seeding default tags...');
   const defaultTags = [
-    { name: 'Breaking News', slug: 'breaking-news' },
-    { name: 'Exclusive', slug: 'exclusive' },
-    { name: 'Investigation', slug: 'investigation' },
-    { name: 'Opinion', slug: 'opinion' },
-    { name: 'Analysis', slug: 'analysis' },
-    { name: 'Interview', slug: 'interview' },
-    { name: 'Live Update', slug: 'live-update' },
-    { name: 'Special Report', slug: 'special-report' },
+    { name: 'Breaking News', slug: 'breaking-news', nameBn: 'জরুরি সংবাদ' },
+    { name: 'Exclusive', slug: 'exclusive', nameBn: 'এক্সক্লুসিভ' },
+    { name: 'Investigation', slug: 'investigation', nameBn: 'অনুসন্ধান' },
+    { name: 'Opinion', slug: 'opinion', nameBn: 'মতামত' },
+    { name: 'Analysis', slug: 'analysis', nameBn: 'বিশ্লেষণ' },
+    { name: 'Interview', slug: 'interview', nameBn: 'সাক্ষাৎকার' },
+    { name: 'Live Update', slug: 'live-update', nameBn: 'সরাসরি আপডেট' },
+    { name: 'Special Report', slug: 'special-report', nameBn: 'বিশেষ প্রতিবেদন' },
   ];
 
   for (const tag of defaultTags) {
-    await prisma.tag.upsert({
+    const created = await prisma.tag.upsert({
       where: { slug: tag.slug },
       update: {},
       create: {
@@ -250,7 +372,14 @@ async function main() {
         status: TagStatus.ACTIVE,
       },
     });
-    console.log(`  ✓ Tag: ${tag.name}`);
+    for (const [languageId, name] of [[bnLanguageId, tag.nameBn], [enLanguageId, tag.name]] as const) {
+      await prisma.tagTranslation.upsert({
+        where: { tagId_languageId: { tagId: created.id, languageId } },
+        update: { name },
+        create: { tagId: created.id, languageId, name, slug: tag.slug },
+      });
+    }
+    console.log(`  ✓ Tag: ${tag.name} (${tag.nameBn})`);
   }
 
   // ==================== ADMIN USER ====================
@@ -766,6 +895,9 @@ async function main() {
         authorId: adminUserId,
         categoryId: category?.id || null,
         locationId: location?.id || null,
+        // Seeded prose is English; the site's default language (bn) is a separate, per-story choice
+        // editors make when they actually write in Bangla (see the multilingual sample articles below).
+        languageId: enLanguageId,
         publishedAt: article.status === ArticleStatus.PUBLISHED ? new Date() : null,
         reviewedAt: article.status === ArticleStatus.PUBLISHED ? new Date() : null,
         reviewedById: article.status === ArticleStatus.PUBLISHED ? adminUserId : null,
@@ -825,6 +957,7 @@ async function main() {
       authorId: adminUserId,
       categoryId: (await prisma.category.findUnique({ where: { slug: 'bangladesh' } }))?.id || null,
       locationId: (await findSeedLocation('dhaka'))?.id || null,
+      languageId: enLanguageId,
       publishedAt: new Date(),
       reviewedAt: new Date(),
       reviewedById: adminUserId,
@@ -864,6 +997,7 @@ async function main() {
       authorId: adminUserId,
       categoryId: (await prisma.category.findUnique({ where: { slug: 'politics' } }))?.id || null,
       locationId: (await findSeedLocation('dhaka'))?.id || null,
+      languageId: enLanguageId,
       scheduledAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
@@ -947,6 +1081,7 @@ async function main() {
         authorId: adminUserId,
         categoryId: category?.id || null,
         locationId: location?.id || null,
+        languageId: enLanguageId,
         publishedAt: new Date(),
         reviewedAt: new Date(),
         reviewedById: adminUserId,
@@ -987,11 +1122,113 @@ async function main() {
 
   console.log(`  ✓ Added shared tags to ${Math.min(3, existingArticles.length)} articles`);
 
+  // ==================== MULTILINGUAL SAMPLE ARTICLES ====================
+  // Real Bangla-script content, so language switching is visually testable — not just English prose
+  // tagged with a Bangla languageId. One pair proves the translation relationship end-to-end
+  // (Part 26/27); one Bangla-only article exercises the "missing translation" fallback (Part 15).
+  console.log('\n🌐 Seeding multilingual sample articles (বাংলা + English)...');
+
+  const bangladeshCategoryId = (await prisma.category.findUnique({ where: { slug: 'bangladesh' } }))?.id || null;
+  const dhakaLocationId = (await findSeedLocation('dhaka'))?.id || null;
+  const rajshahiLocationId = (await findSeedLocation('rajshahi'))?.id || null;
+
+  const metroBn = await prisma.article.upsert({
+    where: { slug: 'dhaka-metro-notun-station-bn' },
+    update: {},
+    create: {
+      title: 'ঢাকায় নতুন মেট্রোরেল স্টেশন উদ্বোধন',
+      slug: 'dhaka-metro-notun-station-bn',
+      excerpt: 'রাজধানী ঢাকায় মেট্রোরেলের নতুন স্টেশন চালু হয়েছে, যাত্রীদের যাতায়াত সহজ হবে বলে আশা করা হচ্ছে।',
+      content: {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'নতুন স্টেশন চালু' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'ঢাকা ম্যাস ট্রানজিট কোম্পানি লিমিটেড (ডিএমটিসিএল) আজ থেকে নতুন মেট্রোরেল স্টেশন যাত্রীদের জন্য উন্মুক্ত করেছে। এতে নগরীর যানজট কমবে বলে কর্তৃপক্ষ আশাবাদী।' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'নতুন স্টেশনটি প্রতিদিন হাজার হাজার যাত্রীর যাতায়াতে সহায়ক হবে এবং শহরের গণপরিবহন ব্যবস্থাকে আরও উন্নত করবে।' }] },
+        ],
+      },
+      status: ArticleStatus.PUBLISHED,
+      authorId: adminUserId,
+      categoryId: bangladeshCategoryId,
+      locationId: dhakaLocationId,
+      languageId: bnLanguageId,
+      publishedAt: new Date(),
+      reviewedAt: new Date(),
+      reviewedById: adminUserId,
+    },
+  });
+
+  // Idempotent across re-seeds: only create the group the first time this article gets one.
+  let metroGroupId = metroBn.translationGroupId;
+  if (!metroGroupId) {
+    const updated = await prisma.article.update({
+      where: { id: metroBn.id },
+      data: { translationGroup: { create: {} } },
+      select: { translationGroupId: true },
+    });
+    metroGroupId = updated.translationGroupId;
+  }
+
+  const metroEn = await prisma.article.upsert({
+    where: { slug: 'dhaka-metro-new-station-en' },
+    update: { translationGroupId: metroGroupId },
+    create: {
+      title: 'New Metro Station Opens in Dhaka',
+      slug: 'dhaka-metro-new-station-en',
+      excerpt: 'A new metro rail station has opened in the capital Dhaka, expected to ease commuting for thousands of daily passengers.',
+      content: {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'New station opens' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'The Dhaka Mass Transit Company Limited (DMTCL) has opened a new metro rail station to passengers today. Authorities expect the addition to ease traffic congestion in the capital.' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: "The new station is expected to serve thousands of daily commuters and further strengthen the city's public transit network." }] },
+        ],
+      },
+      status: ArticleStatus.PUBLISHED,
+      authorId: adminUserId,
+      categoryId: bangladeshCategoryId,
+      locationId: dhakaLocationId,
+      languageId: enLanguageId,
+      translationGroupId: metroGroupId,
+      publishedAt: new Date(),
+      reviewedAt: new Date(),
+      reviewedById: adminUserId,
+    },
+  });
+  console.log(`  ✓ Translation pair: "${metroBn.title}" (bn) ↔ "${metroEn.title}" (en)`);
+
+  const lightningBn = await prisma.article.upsert({
+    where: { slug: 'rajshahi-bojropate-mrittu-bn' },
+    update: {},
+    create: {
+      title: 'রাজশাহীতে বজ্রপাতে দুইজনের মৃত্যু',
+      slug: 'rajshahi-bojropate-mrittu-bn',
+      excerpt: 'রাজশাহীর একটি গ্রামে বজ্রপাতে দুই কৃষকের মৃত্যু হয়েছে। স্থানীয় প্রশাসন শোক প্রকাশ করেছে।',
+      content: {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'দুর্ঘটনার বিবরণ' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'রাজশাহীর একটি গ্রামে মাঠে কাজ করার সময় বজ্রপাতে দুই কৃষকের মৃত্যু হয়েছে। স্থানীয় প্রশাসন ক্ষতিগ্রস্ত পরিবারের পাশে দাঁড়ানোর ঘোষণা দিয়েছে।' }] },
+        ],
+      },
+      status: ArticleStatus.PUBLISHED,
+      authorId: adminUserId,
+      categoryId: bangladeshCategoryId,
+      locationId: rajshahiLocationId,
+      languageId: bnLanguageId,
+      publishedAt: new Date(),
+      reviewedAt: new Date(),
+      reviewedById: adminUserId,
+    },
+  });
+  console.log(`  ✓ Bangla-only article (no translation yet): "${lightningBn.title}"`);
+
   // ==================== SUMMARY ====================
   const counts = await Promise.all([
     prisma.role.count(),
     prisma.permission.count(),
     prisma.rolePermission.count(),
+    prisma.language.count(),
     prisma.location.count(),
     prisma.category.count(),
     prisma.tag.count(),
@@ -1003,11 +1240,12 @@ async function main() {
   console.log(`   Roles: ${counts[0]}`);
   console.log(`   Permissions: ${counts[1]}`);
   console.log(`   Role-Permissions: ${counts[2]}`);
-  console.log(`   Locations: ${counts[3]} (1 country + 8 divisions + 64 districts)`);
-  console.log(`   Categories: ${counts[4]}`);
-  console.log(`   Tags: ${counts[5]}`);
-  console.log(`   Articles: ${counts[6]} (12 original + 5 district + 1 breaking + 1 scheduled)`);
-  console.log(`   Article-Tags: ${counts[7]}`);
+  console.log(`   Languages: ${counts[3]} (bn default, en)`);
+  console.log(`   Locations: ${counts[4]} (Bangladesh: 1 country + 8 divisions + 64 districts; global: 3 continents + 4 countries + 1 state + 2 cities)`);
+  console.log(`   Categories: ${counts[5]}`);
+  console.log(`   Tags: ${counts[6]}`);
+  console.log(`   Articles: ${counts[7]} (12 original + 5 district + 1 breaking + 1 scheduled + 1 bn/en pair + 1 bn-only)`);
+  console.log(`   Article-Tags: ${counts[8]}`);
   console.log('   Admin user seeded without printing credentials.');
 }
 

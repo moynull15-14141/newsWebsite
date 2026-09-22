@@ -9,7 +9,11 @@ import {
   heroSection,
   issuesForSection,
   listedSections,
+  describeSource,
+  isManualSection,
+  isManualSource,
   maxItemsBounds,
+  requiredSourceLink,
   moveItem,
   placementIds,
   publishState,
@@ -202,5 +206,48 @@ describe('article picker rules', () => {
 describe('placement fixtures sanity', () => {
   it('builds placements in order', () => {
     expect(placement('x', 2).sortOrder).toBe(2);
+  });
+});
+
+describe('content sources', () => {
+  it('recognises hand-picked sections', () => {
+    expect(isManualSource('MANUAL')).toBe(true);
+    for (const source of ['LATEST', 'CATEGORY', 'TAG', 'LOCATION']) expect(isManualSource(source)).toBe(false);
+    expect(isManualSection(section('latest', 'LATEST', ['a1']))).toBe(true);
+    expect(isManualSection(section('latest', 'LATEST', [], { sourceType: 'LATEST' }))).toBe(false);
+  });
+
+  it('states which link each source needs', () => {
+    expect(requiredSourceLink('MANUAL')).toBeNull();
+    expect(requiredSourceLink('LATEST')).toBeNull();
+    expect(requiredSourceLink('CATEGORY')).toBe('categoryId');
+    expect(requiredSourceLink('TAG')).toBe('tagId');
+    expect(requiredSourceLink('LOCATION')).toBe('locationId');
+  });
+
+  it('describes each source for the section header', () => {
+    expect(describeSource(section('s', 'CUSTOM', ['a1']))).toBe('Hand-picked');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'LATEST' }))).toBe('Latest published');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'CATEGORY', category: { id: 'c', name: 'Politics', slug: 'politics' } }))).toBe('Category: Politics');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'TAG', tag: { id: 't', name: 'Election', slug: 'election' } }))).toBe('Tag: Election');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'LOCATION', location: { id: 'l', name: 'Dhaka', slug: 'dhaka', type: 'DIVISION' } }))).toBe('Location: Dhaka');
+  });
+
+  it('says when an automatic source is missing its link', () => {
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'CATEGORY' }))).toBe('Category: not set');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'TAG' }))).toBe('Tag: not set');
+    expect(describeSource(section('s', 'CUSTOM', [], { sourceType: 'LOCATION' }))).toBe('Location: not set');
+  });
+
+  it('pins the story limit to placed stories only for hand-picked sections', () => {
+    const manual = section('latest', 'LATEST', ['a1', 'a2', 'a3']);
+    expect(maxItemsBounds(manual)).toMatchObject({ min: 3, fixed: false });
+
+    // The same section switched to an automatic source holds no placements, so the floor drops to 1.
+    expect(maxItemsBounds({ ...manual, sourceType: 'CATEGORY' })).toMatchObject({ min: 1, fixed: false });
+  });
+
+  it('keeps the Hero fixed at one story regardless of source', () => {
+    expect(maxItemsBounds(section('hero', 'HERO', ['h1']))).toEqual({ min: 1, max: 1, fixed: true });
   });
 });

@@ -2,18 +2,33 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { Copy, Check, Clock, Share2 } from 'lucide-react';
+import { Copy, Check, Clock, Share2, Languages as LanguagesIcon } from 'lucide-react';
 import SeoHead from '@/components/SeoHead';
 import TiptapRenderer from '@/components/TiptapRenderer';
 import ArticleCard from '@/components/ArticleCard';
 import CommentsSection from '@/components/CommentsSection';
 import AdSlot from '@/components/AdSlot';
 import BookmarkButton from '@/components/BookmarkButton';
+import { useLanguage } from '@/lib/i18n';
+import { formatLocalizedDate } from '@/lib/format-date';
 
 interface Tag {
   id: string;
   name: string;
   slug: string;
+}
+
+interface ArticleLanguage {
+  id: string;
+  code: string;
+  name: string;
+  nativeName: string;
+}
+
+interface ArticleTranslation {
+  slug: string;
+  title: string;
+  language: ArticleLanguage;
 }
 
 interface Article {
@@ -39,15 +54,9 @@ interface Article {
   media?: { id: string; publicUrl: string };
   _count?: { comments: number };
   corrections?: { id: string; description: string; correctedAt: string }[];
-}
-
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  language?: ArticleLanguage | null;
+  /** PUBLISHED sibling versions of this exact story in other languages (Part 14/17). */
+  translations?: ArticleTranslation[];
 }
 
 function estimateReadingTime(content?: Record<string, unknown>): number {
@@ -60,7 +69,11 @@ function estimateReadingTime(content?: Record<string, unknown>): number {
 export default function ArticlePage() {
   const { slug } = useParams<{ slug: string }>();
   const [copied, setCopied] = useState(false);
+  const { code, t, pathFor } = useLanguage();
 
+  // Slug lookup is language-agnostic on purpose (each language version has its own slug) — see
+  // apps/api/src/modules/public/public.service.ts. `code` is not sent here; it only decides how the
+  // page around the article (nav, dates, notices) is presented.
   const { data: article, isLoading, error } = useQuery<Article>({
     queryKey: ['article', slug],
     queryFn: () => apiFetch(`/public/articles/${slug}`),
@@ -117,9 +130,9 @@ export default function ArticlePage() {
     return (
       <div className="container-narrow py-16 text-center">
         <h1 className="text-4xl font-bold text-gray-300">404</h1>
-        <p className="mt-4 text-lg text-gray-600">Article not found</p>
-        <Link to="/" className="mt-6 inline-block text-primary-500 hover:underline">
-          Go back home
+        <p className="mt-4 text-lg text-gray-600">{t('common.404Title')}</p>
+        <Link to={pathFor('/', code)} className="mt-6 inline-block text-primary-500 hover:underline">
+          {t('common.goBackHome')}
         </Link>
       </div>
     );
@@ -129,6 +142,19 @@ export default function ArticlePage() {
   const tags = article.articleTags?.map((at) => at.tag).filter(Boolean) || [];
   const readingTime = estimateReadingTime(article.content);
 
+  // Part 15: never fabricate a translation. The article renders exactly as stored (its own language);
+  // if that differs from the reader's current site language, a plain notice says so instead of silently
+  // mixing languages, and — when one exists — offers the real translation.
+  const articleLanguageCode = article.language?.code;
+  const languageMismatch = !!articleLanguageCode && articleLanguageCode !== code;
+  const otherTranslations = (article.translations ?? []).filter((tr) => tr.language.code !== articleLanguageCode);
+  const readerLanguageTranslation = otherTranslations.find((tr) => tr.language.code === code);
+
+  const alternates = [
+    ...(articleLanguageCode ? [{ code: articleLanguageCode, url: pathFor(`/article/${article.slug}`, articleLanguageCode) }] : []),
+    ...otherTranslations.map((tr) => ({ code: tr.language.code, url: pathFor(`/article/${tr.slug}`, tr.language.code) })),
+  ];
+
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'NewsArticle',
@@ -137,6 +163,7 @@ export default function ArticlePage() {
     author: article.author ? { '@type': 'Person', name: article.author.name } : undefined,
     datePublished: article.publishedAt,
     image: imageUrl,
+    inLanguage: articleLanguageCode,
     publisher: {
       '@type': 'Organization',
       name: 'BD News',
@@ -158,16 +185,17 @@ export default function ArticlePage() {
         section={article.category?.name}
         noIndex={article.noIndex}
         jsonLd={jsonLd}
+        alternates={alternates.length > 1 ? alternates : undefined}
       />
 
       <article className="container-narrow py-8 lg:py-12">
         <AdSlot slot="ARTICLE_TOP" pageType="article" categoryId={article.category?.id} locationId={article.location?.id} />
         <nav className="mb-6 text-sm text-gray-500">
-          <Link to="/" className="hover:text-primary-500">Home</Link>
+          <Link to={pathFor('/', code)} className="hover:text-primary-500">{t('common.home')}</Link>
           {article.category && (
             <>
               <span className="mx-2">&gt;</span>
-              <Link to={`/category/${article.category.slug}`} className="hover:text-primary-500">
+              <Link to={pathFor(`/category/${article.category.slug}`, code)} className="hover:text-primary-500">
                 {article.category.name}
               </Link>
             </>
@@ -176,18 +204,30 @@ export default function ArticlePage() {
           <span className="text-gray-700">{article.title}</span>
         </nav>
 
+        {languageMismatch && article.language && (
+          <div role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <LanguagesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{t('article.notAvailableInLanguage', { language: code === 'bn' ? 'বাংলা' : 'English', original: article.language.nativeName })}</span>
+            {readerLanguageTranslation && (
+              <Link to={pathFor(`/article/${readerLanguageTranslation.slug}`, code)} className="font-semibold underline hover:no-underline">
+                {t('article.alsoAvailableIn', { language: readerLanguageTranslation.language.nativeName })}
+              </Link>
+            )}
+          </div>
+        )}
+
         {article.category && (
           <span className="mb-3 inline-block rounded bg-primary-500 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
             {article.category.name}
           </span>
         )}
 
-        <h1 className="text-3xl font-bold leading-tight text-gray-900 lg:text-4xl">
+        <h1 lang={articleLanguageCode} className="text-3xl font-bold leading-tight text-gray-900 lg:text-4xl">
           {article.title}
         </h1>
 
         {article.excerpt && (
-          <p className="mt-3 text-lg leading-relaxed text-gray-600">
+          <p lang={articleLanguageCode} className="mt-3 text-lg leading-relaxed text-gray-600">
             {article.excerpt}
           </p>
         )}
@@ -195,13 +235,24 @@ export default function ArticlePage() {
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-500">
           {article.author && <span className="font-medium text-gray-700">{article.author.name}</span>}
           {article.author && article.publishedAt && <span>&middot;</span>}
-          {article.publishedAt && <time>{formatDate(article.publishedAt)}</time>}
+          {article.publishedAt && <time dateTime={article.publishedAt}>{formatLocalizedDate(article.publishedAt, articleLanguageCode ?? code)}</time>}
           <span>&middot;</span>
           <span className="inline-flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {readingTime} min read
+            {t('common.minRead', { n: readingTime })}
           </span>
         </div>
+
+        {!languageMismatch && otherTranslations.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-3 text-sm">
+            {otherTranslations.map((tr) => (
+              <Link key={tr.slug} to={pathFor(`/article/${tr.slug}`, tr.language.code)} lang={tr.language.code} className="inline-flex items-center gap-1 text-primary-600 hover:underline">
+                <LanguagesIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('article.alsoAvailableIn', { language: tr.language.nativeName })}
+              </Link>
+            ))}
+          </div>
+        )}
 
         {imageUrl && (
           <figure className="my-8">
@@ -209,25 +260,25 @@ export default function ArticlePage() {
           </figure>
         )}
 
-        <div className="prose prose-lg max-w-none font-serif">
+        <div lang={articleLanguageCode} className="prose prose-lg max-w-none font-serif">
           {article.content && <TiptapRenderer content={article.content as Record<string, unknown>} />}
         </div>
 
         {article.corrections?.length ? (
           <aside className="mt-8 border-l-4 border-primary-500 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-            <p className="font-semibold">Updated</p>
+            <p className="font-semibold">{t('common.updated')}</p>
             <p className="mt-1">{article.corrections[0].description}</p>
           </aside>
         ) : null}
 
         {tags.length > 0 && (
           <div className="mt-8 border-t border-gray-200 pt-6">
-            <span className="text-sm font-semibold text-gray-700">Tags:</span>
+            <span className="text-sm font-semibold text-gray-700">{t('common.tags')}</span>
             <div className="mt-2 flex flex-wrap gap-2">
               {tags.map((tag) => (
                 <Link
                   key={tag.id}
-                  to={`/tag/${tag.slug}`}
+                  to={pathFor(`/tag/${tag.slug}`, code)}
                   className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200"
                 >
                   {tag.name}
@@ -240,10 +291,10 @@ export default function ArticlePage() {
         <div className="mt-8 border-t border-gray-200 pt-6">
           <div className="flex flex-wrap gap-2">
             <BookmarkButton articleId={article.id} />
-            <button onClick={handleCopyLink} className="inline-flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? 'Copied!' : 'Copy link'}</button>
+            <button onClick={handleCopyLink} className="inline-flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? t('common.copied') : t('common.copyLink')}</button>
             <button onClick={() => handleShare('https://www.facebook.com/sharer/sharer.php?u=')} className="inline-flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"><Share2 size={16} /> Facebook</button>
             <button onClick={() => handleShare('https://wa.me/?text=')} className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">WhatsApp</button>
-            {typeof navigator.share === 'function' && <button onClick={() => handleShare('native')} className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Share</button>}
+            {typeof navigator.share === 'function' && <button onClick={() => handleShare('native')} className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">{t('common.share')}</button>}
           </div>
         </div>
         <AdSlot slot="ARTICLE_BOTTOM" pageType="article" categoryId={article.category?.id} locationId={article.location?.id} />
@@ -252,7 +303,7 @@ export default function ArticlePage() {
 
       {related && related.length > 0 && (
         <section className="container-wide border-t border-neutral-200 py-12">
-          <h2 className="mb-6 text-2xl font-bold text-neutral-900">Related Articles</h2>
+          <h2 className="mb-6 text-2xl font-bold text-neutral-900">{t('common.relatedArticles')}</h2>
           <div className="grid gap-6 md:grid-cols-3 lg:grid-cols-4">
             {related.slice(0, 4).map((a) => (
               <ArticleCard key={a.id} article={a} variant="standard" />

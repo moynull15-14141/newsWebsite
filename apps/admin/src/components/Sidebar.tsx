@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus } from 'lucide-react';
+import { LayoutDashboard, FileText, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
 const menuItems: Array<{ label: string; href: string; icon: typeof LayoutDashboard; permission?: string }> = [
@@ -14,6 +14,7 @@ const menuItems: Array<{ label: string; href: string; icon: typeof LayoutDashboa
   { label: 'Categories', href: '/categories', icon: FolderOpen },
   { label: 'Tags', href: '/tags', icon: Tag },
   { label: 'Locations', href: '/locations', icon: MapPin },
+  { label: 'Languages', href: '/languages', icon: Globe2, permission: 'settings.manage' },
   { label: 'Users', href: '/users', icon: Users },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];

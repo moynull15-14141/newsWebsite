@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { articleLanguageWhere, LanguageFilter } from '../../../common/i18n/article-language';
 
 @Injectable()
 export class MostReadService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getMostRead(options: { limit?: number; window?: 'today' | '24h' | '7d' } = {}) {
-    const { limit = 10, window: timeWindow = '24h' } = options;
+  async getMostRead(options: { limit?: number; window?: 'today' | '24h' | '7d'; language?: LanguageFilter } = {}) {
+    const { limit = 10, window: timeWindow = '24h', language } = options;
     const now = new Date();
     let since: Date;
 
@@ -28,6 +29,7 @@ export class MostReadService {
     const articles = await this.prisma.article.findMany({
       where: {
         status: 'PUBLISHED',
+        ...(language ? articleLanguageWhere(language) : {}),
       },
       select: {
         id: true,

@@ -120,7 +120,8 @@ export interface SeedLocationRow {
 
 /**
  * Verifies the seeded Bangladesh location hierarchy:
- *  - exactly 1 country (Bangladesh)
+ *  - exactly 1 Bangladesh country record (other COUNTRY rows may legitimately exist — Phase 2C adds a
+ *    global hierarchy of continents/countries alongside Bangladesh, in the same `locations` table)
  *  - exactly 8 divisions
  *  - exactly 64 districts
  *  - every district's parent is a valid division
@@ -133,7 +134,8 @@ export function verifyLocationSeedIntegrity(locations: SeedLocationRow[]): void 
   const divisions = locations.filter((l) => l.type === LocationType.DIVISION);
   const districts = locations.filter((l) => l.type === LocationType.DISTRICT);
 
-  if (countries.length !== 1 || countries[0].slug !== 'bangladesh') {
+  const bangladeshCountries = countries.filter((c) => c.slug === 'bangladesh');
+  if (bangladeshCountries.length !== 1) {
     throw new Error('Location seed integrity failure: expected exactly one Bangladesh country record');
   }
   if (divisions.length !== EXPECTED_DIVISION_COUNT) {

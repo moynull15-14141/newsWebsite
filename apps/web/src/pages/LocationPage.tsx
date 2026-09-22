@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useLocation as useRouteLocation, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, withLang } from '@/lib/api';
 import ArticleList from '@/components/ArticleList';
 import SeoHead from '@/components/SeoHead';
 import { publicArticleRoutes } from '@/lib/public-routes';
+import { useLanguage } from '@/lib/i18n';
 
 interface LocationRow {
   id: string;
@@ -15,6 +16,7 @@ interface LocationRow {
 }
 
 function DivisionDistrictBrowser() {
+  const { code, t, pathFor } = useLanguage();
   const { data: locations } = useQuery<LocationRow[]>({
     queryKey: ['locations-browser'],
     queryFn: () => apiFetch('/locations'),
@@ -31,13 +33,13 @@ function DivisionDistrictBrowser() {
   return (
     <section className="mb-10 rounded-xl border border-gray-200 bg-gray-50 p-6">
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Browse by Division
+        {t('common.browseByDivision')}
       </h2>
       <div className="mb-6 flex flex-wrap gap-2">
         {divisions.map((div) => (
           <Link
             key={div.id}
-            to={`/division/${div.slug}`}
+            to={pathFor(`/division/${div.slug}`, code)}
             className="rounded-full bg-primary-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary-700"
           >
             {div.name}
@@ -45,7 +47,7 @@ function DivisionDistrictBrowser() {
         ))}
       </div>
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Districts
+        {t('common.districts')}
       </h2>
       <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
         {divisions.map((div) => (
@@ -55,7 +57,7 @@ function DivisionDistrictBrowser() {
               {(districtsByDivision.get(div.id) || []).map((dist) => (
                 <Link
                   key={dist.id}
-                  to={`/district/${dist.slug}`}
+                  to={pathFor(`/district/${dist.slug}`, code)}
                   className="rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-600 transition hover:border-primary-400 hover:text-primary-700"
                 >
                   {dist.name}
@@ -97,12 +99,15 @@ export default function LocationPage() {
   const { slug: paramSlug } = useParams<{ slug: string }>();
   const route = useRouteLocation();
   const [page, setPage] = useState(1);
-  const locationType = route.pathname === '/bangladesh' ? 'COUNTRY' : route.pathname.startsWith('/division/') ? 'DIVISION' : route.pathname.startsWith('/district/') ? 'DISTRICT' : undefined;
+  const { code, t } = useLanguage();
+  // Route matching stays language-agnostic: the /en prefix (if any) is already consumed by the router
+  // before this component sees the path, so these checks work the same under either language.
+  const locationType = route.pathname.endsWith('/bangladesh') ? 'COUNTRY' : route.pathname.includes('/division/') ? 'DIVISION' : route.pathname.includes('/district/') ? 'DISTRICT' : undefined;
   const slug = paramSlug || (locationType === 'COUNTRY' ? 'bangladesh' : '');
 
   const { data, isLoading, error } = useQuery<ApiResponse>({
-    queryKey: ['location', slug, page],
-    queryFn: () => apiFetch(`${publicArticleRoutes.location(slug)}?page=${page}&limit=20${locationType ? `&locationType=${locationType}` : ''}`),
+    queryKey: ['location', slug, page, code],
+    queryFn: () => apiFetch(withLang(`${publicArticleRoutes.location(slug)}?page=${page}&limit=20${locationType ? `&locationType=${locationType}` : ''}`, code)),
     enabled: !!slug,
   });
 
@@ -128,8 +133,8 @@ export default function LocationPage() {
   if (error) {
     return (
       <div className="container-wide py-12 text-center">
-        <h2 className="text-xl font-semibold text-gray-900">Something went wrong</h2>
-        <p className="mt-2 text-gray-600">Unable to load articles.</p>
+        <h2 className="text-xl font-semibold text-gray-900">{t('common.somethingWrong')}</h2>
+        <p className="mt-2 text-gray-600">{t('common.unableToLoad')}</p>
       </div>
     );
   }
@@ -142,7 +147,7 @@ export default function LocationPage() {
     <>
       <SeoHead
         title={`${displayName} - BD News`}
-        description={`Latest news from ${displayName}`}
+        description={t('common.newsFrom', { name: displayName })}
       />
       <div className="container-wide py-8 lg:py-12">
         <h1 className="mb-8 text-3xl font-bold capitalize text-gray-900">

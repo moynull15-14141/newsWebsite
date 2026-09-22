@@ -60,6 +60,26 @@ describe('P0-02 Bangladesh location seed integrity', () => {
     expect(rows.filter((r) => r.type === DISTRICT)).toHaveLength(64);
   });
 
+  it('Phase 2C: does not reject other (global) COUNTRY records existing alongside Bangladesh', () => {
+    const rows = buildTree();
+    rows.push(
+      { id: 'continent-asia', name: 'Asia', slug: 'asia', type: 'CONTINENT' as never, parentId: null },
+      { id: 'country-india', name: 'India', slug: 'india', type: COUNTRY as never, parentId: 'continent-asia' },
+      { id: 'country-china', name: 'China', slug: 'china', type: COUNTRY as never, parentId: 'continent-asia' },
+    );
+    expect(() => verifyLocationSeedIntegrity(rows)).not.toThrow();
+    expect(rows.filter((r) => r.type === COUNTRY)).toHaveLength(3); // Bangladesh + 2 global countries
+  });
+
+  it('still rejects a tree with zero or duplicate Bangladesh country records', () => {
+    const noBangladesh = buildTree().filter((r) => r.slug !== 'bangladesh');
+    expect(() => verifyLocationSeedIntegrity(noBangladesh)).toThrow(/exactly one Bangladesh/);
+
+    const duplicateBangladesh = buildTree();
+    duplicateBangladesh.push({ id: 'country-2', name: 'Bangladesh (dup)', slug: 'bangladesh', type: COUNTRY as never, parentId: null });
+    expect(() => verifyLocationSeedIntegrity(duplicateBangladesh)).toThrow(/exactly one Bangladesh/);
+  });
+
   it('keeps Dhaka Division and Dhaka District as separate records with correct parentage', () => {
     const rows = buildTree();
     const dhakaDivision = rows.find((r) => r.slug === 'dhaka' && r.type === DIVISION)!;

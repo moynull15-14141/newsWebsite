@@ -75,4 +75,9 @@ export class CreateArticleDto {
   @IsDateString()
   @IsOptional()
   scheduledAt?: string;
+
+  /** Defaults to the platform's default language when omitted. */
+  @IsString()
+  @IsOptional()
+  languageId?: string;
 }

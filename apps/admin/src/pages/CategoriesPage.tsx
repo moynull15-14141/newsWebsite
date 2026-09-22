@@ -4,6 +4,12 @@ import { FolderOpen, Plus, Edit, Trash2, Search, X, Check, AlertCircle, RefreshC
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 
+interface CategoryTranslation {
+  languageId: string;
+  name: string;
+  language?: { id: string; code: string };
+}
+
 interface CategoryItem {
   id: string;
   name: string;
@@ -15,6 +21,14 @@ interface CategoryItem {
   createdAt: string;
   parent?: { id: string; name: string; slug: string } | null;
   _count?: { articles: number; children: number };
+  translations?: CategoryTranslation[];
+}
+
+interface LanguageOption {
+  id: string;
+  code: string;
+  name: string;
+  nativeName: string;
 }
 
 function generateSlug(name: string): string {
@@ -43,12 +57,15 @@ export default function CategoriesPage() {
   const [parentId, setParentId] = useState<string>('');
   const [sortOrder, setSortOrder] = useState<number>(0);
   const [status, setStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [translationNames, setTranslationNames] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const { data: categories = [], isLoading, isError, refetch } = useQuery<CategoryItem[]>({
     queryKey: ['categories-admin'],
     queryFn: () => apiFetch('/categories?all=true'),
   });
+
+  const { data: languages = [] } = useQuery<LanguageOption[]>({ queryKey: ['languages'], queryFn: () => apiFetch('/languages') });
 
   const createMutation = useMutation({
     mutationFn: (payload: {
@@ -58,6 +75,7 @@ export default function CategoriesPage() {
       parentId?: string | null;
       sortOrder?: number;
       status?: string;
+      translations?: { languageId: string; name: string }[];
     }) => apiFetch('/categories', { method: 'POST', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories-admin'] });
@@ -81,6 +99,7 @@ export default function CategoriesPage() {
       parentId?: string | null;
       sortOrder?: number;
       status?: string;
+      translations?: { languageId: string; name: string }[];
     }) => apiFetch(`/categories/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories-admin'] });
@@ -112,6 +131,7 @@ export default function CategoriesPage() {
     setParentId('');
     setSortOrder(categories.length);
     setStatus('ACTIVE');
+    setTranslationNames({});
     setFormError(null);
     setModalOpen(true);
   };
@@ -125,6 +145,7 @@ export default function CategoriesPage() {
     setParentId(cat.parentId || '');
     setSortOrder(cat.sortOrder || 0);
     setStatus(cat.status);
+    setTranslationNames(Object.fromEntries((cat.translations ?? []).map((t) => [t.languageId, t.name])));
     setFormError(null);
     setModalOpen(true);
   };
@@ -153,6 +174,10 @@ export default function CategoriesPage() {
       return;
     }
 
+    const translations = languages
+      .map((lang) => ({ languageId: lang.id, name: (translationNames[lang.id] || '').trim() }))
+      .filter((t) => t.name);
+
     const payload = {
       name: name.trim(),
       slug: slug.trim().toLowerCase(),
@@ -160,6 +185,7 @@ export default function CategoriesPage() {
       parentId: parentId || null,
       sortOrder: Number(sortOrder) || 0,
       status,
+      translations,
     };
 
     if (editingCategory) {
@@ -433,6 +459,26 @@ export default function CategoriesPage() {
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 />
               </div>
+
+              {languages.length > 0 && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-gray-700">Localized names</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Optional — shown to readers in that language instead of the name above.</p>
+                  <div className="mt-2 space-y-2">
+                    {languages.map((lang) => (
+                      <label key={lang.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-16 shrink-0 text-xs font-semibold text-gray-500">{lang.nativeName}</span>
+                        <input
+                          value={translationNames[lang.id] || ''}
+                          onChange={(e) => setTranslationNames({ ...translationNames, [lang.id]: e.target.value })}
+                          placeholder={lang.code === 'bn' ? 'যেমন রাজনীতি' : name || lang.name}
+                          className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

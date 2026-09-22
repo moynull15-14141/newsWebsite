@@ -1,7 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CategoryTranslationDto } from './dto/category-translation.dto';
+
+const TRANSLATIONS_INCLUDE = { translations: { include: { language: { select: { id: true, code: true } } } } } satisfies Prisma.CategoryInclude;
 
 @Injectable()
 export class CategoriesService {
@@ -17,6 +21,7 @@ export class CategoriesService {
         _count: {
           select: { articles: true, children: true },
         },
+        ...TRANSLATIONS_INCLUDE,
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
@@ -31,6 +36,7 @@ export class CategoriesService {
         _count: {
           select: { articles: true },
         },
+        ...TRANSLATIONS_INCLUDE,
       },
     });
     if (!category) {
@@ -48,6 +54,7 @@ export class CategoriesService {
         _count: {
           select: { articles: true },
         },
+        ...TRANSLATIONS_INCLUDE,
       },
     });
     if (!category) {
@@ -73,24 +80,34 @@ export class CategoriesService {
       }
     }
 
-    return this.prisma.category.create({
-      data: {
-        name: dto.name.trim(),
-        slug: dto.slug.trim().toLowerCase(),
-        description: dto.description?.trim(),
-        parentId: dto.parentId || null,
-        sortOrder: dto.sortOrder ?? 0,
-        status: dto.status ?? 'ACTIVE',
-      },
-      include: {
-        parent: {
-          select: { id: true, name: true, slug: true },
+    if (dto.translations?.length) await this.assertTranslationsValid(dto.translations);
+
+    try {
+      return await this.prisma.category.create({
+        data: {
+          name: dto.name.trim(),
+          slug: dto.slug.trim().toLowerCase(),
+          description: dto.description?.trim(),
+          parentId: dto.parentId || null,
+          sortOrder: dto.sortOrder ?? 0,
+          status: dto.status ?? 'ACTIVE',
+          translations: dto.translations?.length
+            ? { create: dto.translations.map((t) => this.translationData(t, dto.slug)) }
+            : undefined,
         },
-        _count: {
-          select: { articles: true },
+        include: {
+          parent: {
+            select: { id: true, name: true, slug: true },
+          },
+          _count: {
+            select: { articles: true },
+          },
+          ...TRANSLATIONS_INCLUDE,
         },
-      },
-    });
+      });
+    } catch (error) {
+      throw this.translateConflict(error);
+    }
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
@@ -120,7 +137,9 @@ export class CategoriesService {
       }
     }
 
-    return this.prisma.category.update({
+    if (dto.translations) await this.assertTranslationsValid(dto.translations);
+
+    const updateData = {
       where: { id },
       data: {
         name: dto.name !== undefined ? dto.name.trim() : undefined,
@@ -137,8 +156,27 @@ export class CategoriesService {
         _count: {
           select: { articles: true },
         },
+        ...TRANSLATIONS_INCLUDE,
       },
-    });
+    } as const;
+
+    try {
+      // Only the translation-replacing path needs a transaction; the common case (no translations
+      // touched) is a single update, same as before Phase 2C.
+      if (!dto.translations) return await this.prisma.category.update(updateData);
+
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.categoryTranslation.deleteMany({ where: { categoryId: id } });
+        if (dto.translations!.length) {
+          await tx.categoryTranslation.createMany({
+            data: dto.translations!.map((t) => ({ categoryId: id, ...this.translationData(t, dto.slug ?? category.slug) })),
+          });
+        }
+        return tx.category.update(updateData);
+      });
+    } catch (error) {
+      throw this.translateConflict(error);
+    }
   }
 
   async remove(id: string) {
@@ -168,5 +206,33 @@ export class CategoriesService {
 
     await this.prisma.category.delete({ where: { id } });
     return { message: `Category "${category.name}" deleted successfully` };
+  }
+
+  /** A translation's own languageId can't repeat within the same request. */
+  private async assertTranslationsValid(translations: CategoryTranslationDto[]) {
+    const seen = new Set<string>();
+    for (const t of translations) {
+      if (seen.has(t.languageId)) throw new BadRequestException('Each language can only have one translation per category.');
+      seen.add(t.languageId);
+    }
+    const languages = await this.prisma.language.findMany({ where: { id: { in: [...seen] } }, select: { id: true } });
+    if (languages.length !== seen.size) throw new BadRequestException('One or more translation languages do not exist.');
+  }
+
+  /** A translation's slug defaults to the category's own slug, keeping /category/:slug language-agnostic unless overridden. */
+  private translationData(t: CategoryTranslationDto, fallbackSlug: string) {
+    return {
+      languageId: t.languageId,
+      name: t.name.trim(),
+      slug: (t.slug ?? fallbackSlug).trim().toLowerCase(),
+      description: t.description?.trim(),
+    };
+  }
+
+  private translateConflict(error: unknown) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return new ConflictException('A translation with that language/slug combination already exists for another category.');
+    }
+    return error;
   }
 }

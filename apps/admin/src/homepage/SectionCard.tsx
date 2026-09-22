@@ -1,7 +1,7 @@
-import { ArrowDown, ArrowUp, EyeOff, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, EyeOff, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import StoryRow from './StoryRow';
-import { canMove, describeIssue, sectionDisplayTitle } from './logic';
-import { layoutMeta, sectionTypeLabel } from './labels';
+import { canMove, describeIssue, describeSource, isManualSection, sectionDisplayTitle } from './logic';
+import { cardVariantLabel, layoutMeta, sectionTypeLabel } from './labels';
 import type { ApiIssue } from '../lib/api-error';
 import type { Draft, DraftSection } from './types';
 
@@ -28,6 +28,7 @@ const iconButton = 'rounded p-1.5 text-gray-600 hover:bg-gray-100 hover:text-gra
 /** One homepage section: metadata, ordering controls and its ordered stories. */
 export default function SectionCard({ section, draft, index, total, issues, disabled, onMove, onToggle, onEdit, onDelete, onAddStories, onMoveStory, onReplaceStory, onRemoveStory }: SectionCardProps) {
   const title = sectionDisplayTitle(section);
+  const manual = isManualSection(section);
   const full = section.placements.length >= section.maxItems;
   const hidden = !section.enabled;
 
@@ -50,8 +51,17 @@ export default function SectionCard({ section, draft, index, total, issues, disa
             <span aria-hidden="true">·</span>
             <span title={layoutMeta(section.layoutType).hint}>{layoutMeta(section.layoutType).label}</span>
             <span aria-hidden="true">·</span>
-            <span>{section.placements.length} of {section.maxItems} stories</span>
-            {section.category && <><span aria-hidden="true">·</span><span>Links to {section.category.name}</span></>}
+            <span>{manual ? `${section.placements.length} of ${section.maxItems} stories` : `Up to ${section.maxItems} stories`}</span>
+            <span aria-hidden="true">·</span>
+            {manual ? (
+              <span>{describeSource(section)}</span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded bg-primary-50 px-1.5 py-0.5 font-semibold text-primary-700">
+                <Zap className="h-3 w-3" aria-hidden="true" /> Auto · {describeSource(section)}
+              </span>
+            )}
+            {section.cardVariant !== 'AUTO' && <><span aria-hidden="true">·</span><span>{cardVariantLabel(section.cardVariant)}</span></>}
+            {manual && section.category && <><span aria-hidden="true">·</span><span>Links to {section.category.name}</span></>}
             {hidden && <span className="inline-flex items-center gap-1 rounded bg-gray-200 px-1.5 py-0.5 font-semibold text-gray-700"><EyeOff className="h-3 w-3" aria-hidden="true" /> Hidden in draft</span>}
           </p>
         </div>
@@ -79,9 +89,14 @@ export default function SectionCard({ section, draft, index, total, issues, disa
           {issues.map((issue, position) => <li key={`${issue.code}-${issue.articleId ?? ''}-${position}`}>{describeIssue(issue, draft)}</li>)}
         </ul>
       )}
-      {section.type === 'LATEST' && <p className="border-b border-gray-100 px-4 py-1.5 text-xs text-gray-500">Curated: stories appear in the order you set here, not by publication time.</p>}
+      {manual && section.type === 'LATEST' && <p className="border-b border-gray-100 px-4 py-1.5 text-xs text-gray-500">Curated: stories appear in the order you set here, not by publication time.</p>}
 
-      {section.placements.length ? (
+      {!manual ? (
+        <p className="px-4 py-4 text-sm text-gray-600">
+          This section fills itself from <strong className="font-semibold text-gray-900">{describeSource(section)}</strong>, newest first, every time the homepage is served.
+          Use <em>Edit section</em> to change the source or switch back to hand-picked stories.
+        </p>
+      ) : section.placements.length ? (
         <ul className="divide-y divide-gray-100" aria-label={`Stories in ${title}`}>
           {section.placements.map((placement, position) => (
             <StoryRow
@@ -101,12 +116,14 @@ export default function SectionCard({ section, draft, index, total, issues, disa
         <p className="px-4 py-4 text-sm text-gray-500">No stories yet. Add stories to make this section appear on the homepage.</p>
       )}
 
-      <footer className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-3 py-2">
-        <button type="button" onClick={onAddStories} disabled={disabled || full} className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50">
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add stories
-        </button>
-        {full && <span className="text-xs text-gray-500">Section is full ({section.maxItems}). Raise the story limit to add more.</span>}
-      </footer>
+      {manual && (
+        <footer className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-3 py-2">
+          <button type="button" onClick={onAddStories} disabled={disabled || full} className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add stories
+          </button>
+          {full && <span className="text-xs text-gray-500">Section is full ({section.maxItems}). Raise the story limit to add more.</span>}
+        </footer>
+      )}
     </article>
   );
 }

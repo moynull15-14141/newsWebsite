@@ -19,16 +19,56 @@ import {
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 
+/** Every administrative level the platform can represent (mirrors LOCATION_TYPES in the API). */
+const ALL_LOCATION_TYPES = ['CONTINENT', 'COUNTRY', 'STATE', 'PROVINCE', 'REGION', 'DIVISION', 'DISTRICT', 'COUNTY', 'CITY', 'MUNICIPALITY', 'UPAZILA', 'SUBDISTRICT', 'OTHER'] as const;
+type LocationTypeValue = (typeof ALL_LOCATION_TYPES)[number];
+
+/**
+ * Which parent types are acceptable for each type, and whether a parent is required at all — mirrors
+ * PARENT_TYPE_RULES in apps/api/src/modules/locations/location-types.ts. Bangladesh's own rule
+ * (DIVISION/DISTRICT/UPAZILA) is unchanged from before global location support existed; the rest are
+ * intentionally permissive because real-world hierarchies vary by country.
+ */
+const PARENT_TYPE_RULES: Record<LocationTypeValue, { allowed: LocationTypeValue[]; required: boolean }> = {
+  CONTINENT: { allowed: [], required: false },
+  COUNTRY: { allowed: ['CONTINENT'], required: false },
+  STATE: { allowed: ['COUNTRY'], required: false },
+  PROVINCE: { allowed: ['COUNTRY'], required: false },
+  REGION: { allowed: ['COUNTRY', 'CONTINENT'], required: false },
+  DIVISION: { allowed: ['COUNTRY'], required: true },
+  DISTRICT: { allowed: ['DIVISION', 'STATE', 'PROVINCE', 'REGION', 'COUNTY'], required: true },
+  COUNTY: { allowed: ['STATE', 'PROVINCE', 'COUNTRY'], required: false },
+  CITY: { allowed: ['COUNTRY', 'STATE', 'PROVINCE', 'REGION', 'COUNTY', 'DIVISION', 'DISTRICT'], required: false },
+  MUNICIPALITY: { allowed: ['DISTRICT', 'COUNTY', 'STATE', 'PROVINCE', 'CITY'], required: false },
+  UPAZILA: { allowed: ['DISTRICT'], required: true },
+  SUBDISTRICT: { allowed: ['DISTRICT', 'COUNTY', 'CITY'], required: false },
+  OTHER: { allowed: [...ALL_LOCATION_TYPES.filter((t) => t !== 'OTHER')], required: false },
+};
+
+interface LocationTranslation {
+  languageId: string;
+  name: string;
+}
+
+interface LanguageOption {
+  id: string;
+  code: string;
+  name: string;
+  nativeName: string;
+}
+
 interface LocationItem {
   id: string;
   name: string;
   slug: string;
-  type: 'COUNTRY' | 'DIVISION' | 'DISTRICT' | 'UPAZILA';
+  type: LocationTypeValue;
   parentId: string | null;
   status: 'ACTIVE' | 'INACTIVE';
+  countryCode?: string | null;
   createdAt: string;
   parent?: { id: string; name: string; type: string; slug: string } | null;
   _count?: { articles: number; children: number };
+  translations?: LocationTranslation[];
 }
 
 interface LocationTreeResponse {
@@ -50,6 +90,22 @@ function generateSlug(name: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+const TYPE_BADGE_COLORS: Partial<Record<LocationTypeValue, string>> = {
+  CONTINENT: 'bg-indigo-100 text-indigo-700',
+  COUNTRY: 'bg-purple-100 text-purple-700',
+  STATE: 'bg-sky-100 text-sky-700',
+  PROVINCE: 'bg-sky-100 text-sky-700',
+  REGION: 'bg-sky-100 text-sky-700',
+  DIVISION: 'bg-blue-100 text-blue-700',
+  DISTRICT: 'bg-teal-100 text-teal-700',
+  COUNTY: 'bg-cyan-100 text-cyan-700',
+  CITY: 'bg-amber-100 text-amber-700',
+  MUNICIPALITY: 'bg-amber-100 text-amber-700',
+  UPAZILA: 'bg-emerald-100 text-emerald-700',
+  SUBDISTRICT: 'bg-emerald-100 text-emerald-700',
+};
+const locationTypeBadge = (type: LocationTypeValue) => TYPE_BADGE_COLORS[type] ?? 'bg-gray-100 text-gray-700';
+
 export default function LocationsPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
@@ -57,7 +113,7 @@ export default function LocationsPage() {
 
   const [viewMode, setViewMode] = useState<'tree' | 'table'>('tree');
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'DIVISION' | 'DISTRICT' | 'UPAZILA'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | LocationTypeValue>('ALL');
   const [expandedDivisions, setExpandedDivisions] = useState<Record<string, boolean>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -66,9 +122,11 @@ export default function LocationsPage() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
-  const [type, setType] = useState<'DIVISION' | 'DISTRICT' | 'UPAZILA'>('DISTRICT');
+  const [type, setType] = useState<LocationTypeValue>('DISTRICT');
   const [parentId, setParentId] = useState('');
   const [status, setStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [countryCode, setCountryCode] = useState('');
+  const [translationNames, setTranslationNames] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const { data: treeData, isLoading: treeLoading, refetch: refetchTree } = useQuery<LocationTreeResponse>({
@@ -81,6 +139,8 @@ export default function LocationsPage() {
     queryFn: () => apiFetch('/locations?all=true'),
   });
 
+  const { data: languages = [] } = useQuery<LanguageOption[]>({ queryKey: ['languages'], queryFn: () => apiFetch('/languages') });
+
   const createMutation = useMutation({
     mutationFn: (payload: {
       name: string;
@@ -88,6 +148,8 @@ export default function LocationsPage() {
       type: string;
       parentId?: string | null;
       status?: string;
+      countryCode?: string;
+      translations?: LocationTranslation[];
     }) => apiFetch('/locations', { method: 'POST', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['locations-tree'] });
@@ -110,6 +172,8 @@ export default function LocationsPage() {
       slug?: string;
       parentId?: string | null;
       status?: string;
+      countryCode?: string | null;
+      translations?: LocationTranslation[];
     }) => apiFetch(`/locations/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['locations-tree'] });
@@ -150,7 +214,7 @@ export default function LocationsPage() {
     setExpandedDivisions({});
   };
 
-  const openCreateModal = (defaultType?: 'DIVISION' | 'DISTRICT' | 'UPAZILA', defaultParentId?: string) => {
+  const openCreateModal = (defaultType?: LocationTypeValue, defaultParentId?: string) => {
     setEditingLoc(null);
     setName('');
     setSlug('');
@@ -158,6 +222,8 @@ export default function LocationsPage() {
     setType(defaultType || 'DISTRICT');
     setParentId(defaultParentId || '');
     setStatus('ACTIVE');
+    setCountryCode('');
+    setTranslationNames({});
     setFormError(null);
     setModalOpen(true);
   };
@@ -167,9 +233,11 @@ export default function LocationsPage() {
     setName(loc.name);
     setSlug(loc.slug);
     setSlugManuallyEdited(true);
-    setType(loc.type as 'DIVISION' | 'DISTRICT' | 'UPAZILA');
+    setType(loc.type);
     setParentId(loc.parentId || '');
     setStatus(loc.status);
+    setCountryCode(loc.countryCode || '');
+    setTranslationNames(Object.fromEntries((loc.translations ?? []).map((t) => [t.languageId, t.name])));
     setFormError(null);
     setModalOpen(true);
   };
@@ -198,28 +266,35 @@ export default function LocationsPage() {
       return;
     }
 
-    if (type === 'DISTRICT' && !parentId) {
-      setFormError('A district must have a parent division');
+    if (PARENT_TYPE_RULES[type].required && !parentId) {
+      setFormError(`A ${type.toLowerCase()} must have a parent location.`);
       return;
     }
 
-    if (type === 'UPAZILA' && !parentId) {
-      setFormError('An upazila must have a parent district');
-      return;
-    }
-
-    const payload = {
-      name: name.trim(),
-      slug: slug.trim().toLowerCase(),
-      type,
-      parentId: parentId || null,
-      status,
-    };
+    const translations = languages
+      .map((lang) => ({ languageId: lang.id, name: (translationNames[lang.id] || '').trim() }))
+      .filter((t) => t.name);
 
     if (editingLoc) {
-      updateMutation.mutate({ id: editingLoc.id, ...payload });
+      updateMutation.mutate({
+        id: editingLoc.id,
+        name: name.trim(),
+        slug: slug.trim().toLowerCase(),
+        parentId: parentId || null,
+        status,
+        countryCode: countryCode.trim() || null,
+        translations,
+      });
     } else {
-      createMutation.mutate(payload);
+      createMutation.mutate({
+        name: name.trim(),
+        slug: slug.trim().toLowerCase(),
+        type,
+        parentId: parentId || null,
+        status,
+        countryCode: countryCode.trim() || undefined,
+        translations,
+      });
     }
   };
 
@@ -247,12 +322,10 @@ export default function LocationsPage() {
     return matchesSearch && matchesType;
   });
 
-  const availableParents = allLocations.filter((l) => {
-    if (type === 'DIVISION') return l.type === 'COUNTRY';
-    if (type === 'DISTRICT') return l.type === 'DIVISION';
-    if (type === 'UPAZILA') return l.type === 'DISTRICT';
-    return false;
-  });
+  const parentRule = PARENT_TYPE_RULES[type];
+  const availableParents = parentRule.allowed.length
+    ? allLocations.filter((l) => parentRule.allowed.includes(l.type))
+    : [];
 
   return (
     <div className="space-y-6">
@@ -365,13 +438,13 @@ export default function LocationsPage() {
 
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as 'ALL' | 'DIVISION' | 'DISTRICT' | 'UPAZILA')}
+            onChange={(e) => setTypeFilter(e.target.value as 'ALL' | LocationTypeValue)}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
           >
             <option value="ALL">All Types</option>
-            <option value="DIVISION">Divisions Only</option>
-            <option value="DISTRICT">Districts Only</option>
-            <option value="UPAZILA">Upazilas Only</option>
+            {ALL_LOCATION_TYPES.map((t) => (
+              <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
+            ))}
           </select>
         </div>
       )}
@@ -516,19 +589,10 @@ export default function LocationsPage() {
                         <div className="text-xs text-gray-400 font-mono">/{loc.slug}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${
-                            loc.type === 'COUNTRY'
-                              ? 'bg-purple-100 text-purple-700'
-                              : loc.type === 'DIVISION'
-                              ? 'bg-blue-100 text-blue-700'
-                              : loc.type === 'DISTRICT'
-                              ? 'bg-teal-100 text-teal-700'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
+                        <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${locationTypeBadge(loc.type)}`}>
                           {loc.type}
                         </span>
+                        {loc.countryCode && <span className="ml-1.5 font-mono text-[10px] text-gray-400">{loc.countryCode}</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-600">
                         {loc.parent ? loc.parent.name : '—'}
@@ -605,36 +669,54 @@ export default function LocationsPage() {
                   value={type}
                   disabled={!!editingLoc}
                   onChange={(e) => {
-                    setType(e.target.value as 'DIVISION' | 'DISTRICT' | 'UPAZILA');
+                    setType(e.target.value as LocationTypeValue);
                     setParentId('');
                   }}
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:bg-gray-100"
                 >
-                  <option value="DIVISION">DIVISION</option>
-                  <option value="DISTRICT">DISTRICT</option>
-                  <option value="UPAZILA">UPAZILA</option>
+                  {ALL_LOCATION_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
                 </select>
+                <p className="mt-1 text-xs text-gray-500">Bangladesh uses DIVISION/DISTRICT/UPAZILA. Other types (CONTINENT, COUNTRY, STATE, CITY, …) cover the rest of the world.</p>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Parent {type === 'DISTRICT' ? 'Division' : type === 'UPAZILA' ? 'District' : 'Country'}{' '}
-                  <span className="text-red-500">*</span>
-                </label>
-                <select
-                    value={parentId}
-                    onChange={(e) => setParentId(e.target.value)}
-                    required
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                  >
-                    <option value="">Select Parent...</option>
-                    {availableParents.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.type})
-                      </option>
-                    ))}
-                  </select>
+              {availableParents.length > 0 || parentRule.required ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Parent location {parentRule.required && <span className="text-red-500">*</span>}
+                  </label>
+                  <select
+                      value={parentId}
+                      onChange={(e) => setParentId(e.target.value)}
+                      required={parentRule.required}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    >
+                      <option value="">{parentRule.required ? 'Select parent…' : 'None (top level)'}</option>
+                      {availableParents.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.type})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+              ) : (
+                <p className="text-xs text-gray-500">A {type.toLowerCase()} is always top-level (no parent).</p>
+              )}
+
+              {(type === 'COUNTRY' || type === 'CONTINENT') && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Country code (optional)</label>
+                  <input
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
+                    maxLength={2}
+                    placeholder="e.g. IN, US, GB"
+                    className="mt-1 block w-full max-w-[8rem] rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">ISO 3166-1 alpha-2. Children inherit this automatically if left blank.</p>
                 </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -678,6 +760,26 @@ export default function LocationsPage() {
                   <option value="INACTIVE">INACTIVE</option>
                 </select>
               </div>
+
+              {languages.length > 0 && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-gray-700">Localized names</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Optional — the same place, shown in each language (e.g. Dhaka / ঢাকা).</p>
+                  <div className="mt-2 space-y-2">
+                    {languages.map((lang) => (
+                      <label key={lang.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-16 shrink-0 text-xs font-semibold text-gray-500">{lang.nativeName}</span>
+                        <input
+                          value={translationNames[lang.id] || ''}
+                          onChange={(e) => setTranslationNames({ ...translationNames, [lang.id]: e.target.value })}
+                          placeholder={lang.code === 'bn' ? 'যেমন ঢাকা' : name || lang.name}
+                          className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
                 <button

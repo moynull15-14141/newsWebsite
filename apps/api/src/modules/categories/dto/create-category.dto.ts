@@ -1,4 +1,6 @@
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { CategoryTranslationDto } from './category-translation.dto';
 
 export class CreateCategoryDto {
   @IsString()
@@ -28,5 +30,13 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsEnum(['ACTIVE', 'INACTIVE'])
   status?: 'ACTIVE' | 'INACTIVE';
+
+  /** Localized name/slug/description per language. Omitted languages simply have no translation (base name is used). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CategoryTranslationDto)
+  translations?: CategoryTranslationDto[];
 }
 

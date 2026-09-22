@@ -23,6 +23,7 @@ import { EditorialModule } from './modules/editorial/editorial.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { SeoModule } from './modules/seo/seo.module';
+import { LanguagesModule } from './modules/languages/languages.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SeoModule } from './modules/seo/seo.module';
     HomepageModule,
     EditorialModule,
     SeoModule,
+    LanguagesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

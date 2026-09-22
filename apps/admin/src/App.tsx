@@ -19,6 +19,7 @@ import CategoriesPage from './pages/CategoriesPage';
 import TagsPage from './pages/TagsPage';
 import LocationsPage from './pages/LocationsPage';
 import UsersPage from './pages/UsersPage';
+import LanguagesPage from './pages/LanguagesPage';
 
 function App() {
   return (
@@ -48,6 +49,7 @@ function App() {
         <Route path="homepage" element={<RequirePermission permission="homepage.manage"><HomepagePage /></RequirePermission>} />
         <Route path="homepage/preview" element={<RequirePermission permission="homepage.manage"><HomepagePreviewPage /></RequirePermission>} />
         <Route path="collections" element={<CollectionsPage />} />
+        <Route path="languages" element={<RequirePermission permission="settings.manage"><LanguagesPage /></RequirePermission>} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

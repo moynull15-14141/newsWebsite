@@ -12,15 +12,18 @@ const codes = (sections: ValidatableSection[]) => validateHomepageSections(secti
 
 describe('layout presets', () => {
   it('exposes exactly the presets the web renders', () => {
-    expect([...HOMEPAGE_LAYOUT_PRESETS]).toEqual(['FEATURED_STACK', 'THREE_UP', 'COMPACT_LIST']);
+    expect([...HOMEPAGE_LAYOUT_PRESETS]).toEqual([
+      'FEATURED_STACK', 'TWO_UP', 'THREE_UP', 'FOUR_UP', 'GRID', 'COMPACT_LIST', 'HORIZONTAL_LIST', 'IMAGE_LED', 'TEXT_LED',
+    ]);
   });
 
   it('validates and normalizes stored values', () => {
     expect(isLayoutPreset('THREE_UP')).toBe(true);
-    expect(isLayoutPreset('GRID')).toBe(false);
+    expect(isLayoutPreset('GRID')).toBe(true);
+    expect(isLayoutPreset('MOSAIC_XL')).toBe(false);
     expect(isLayoutPreset(undefined)).toBe(false);
     expect(normalizeLayoutPreset('COMPACT_LIST')).toBe('COMPACT_LIST');
-    expect(normalizeLayoutPreset('GRID')).toBe('FEATURED_STACK'); // legacy free-text value
+    expect(normalizeLayoutPreset('MOSAIC_XL')).toBe('FEATURED_STACK'); // legacy free-text value
   });
 
   it('only CUSTOM sections are repeatable', () => {
@@ -55,7 +58,7 @@ describe('validateHomepageSections', () => {
   });
 
   it('flags unknown layouts, blank titles and bad maxItems', () => {
-    expect(codes([section({ layoutType: 'GRID' })])).toContain('INVALID_LAYOUT');
+    expect(codes([section({ layoutType: 'MOSAIC_XL' })])).toContain('INVALID_LAYOUT');
     expect(codes([section({ title: '   ' })])).toContain('EMPTY_TITLE');
     expect(codes([section({ maxItems: 0 })])).toContain('INVALID_MAX_ITEMS');
     expect(codes([section({ maxItems: 999 })])).toContain('INVALID_MAX_ITEMS');

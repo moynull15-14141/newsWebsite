@@ -17,6 +17,8 @@ export const ARTICLE_SELECT = {
   viewCount: true,
   isBreaking: true,
   breakingPriority: true,
+  translationGroupId: true,
+  language: { select: { id: true, code: true, nativeName: true } },
   author: { select: { id: true, name: true } },
   category: { select: { id: true, name: true, slug: true } },
   location: { select: { id: true, name: true, slug: true, type: true } },

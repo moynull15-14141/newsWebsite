@@ -3,19 +3,23 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import Header from './Header';
 import { getHeaderControlLabels } from './header-controls';
+import { LanguageProvider } from '@/lib/i18n';
 
 vi.mock('react-router-dom', () => ({
   Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
     <a href={to} {...props}>{children}</a>
   ),
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 function renderHeader() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
-      <Header />
+      <LanguageProvider>
+        <Header />
+      </LanguageProvider>
     </QueryClientProvider>,
   );
 }
@@ -28,7 +32,9 @@ describe('Header accessibility', () => {
     expect(markup).toContain('aria-controls="site-search"');
     expect(markup).toContain('aria-label="Menu"');
     expect(markup).toContain('aria-controls="mobile-navigation"');
-    expect(markup).toContain('aria-label="Search articles"');
+    // Default language is bn, so the search field's own label is Bangla — this asserts the
+    // aria-label/aria-controls WIRING, not a specific language's text.
+    expect(markup).toContain('aria-label="সংবাদ অনুসন্ধান করুন"');
     expect(markup.match(/aria-expanded="false"/g)).toHaveLength(2);
   });
 
@@ -39,4 +45,17 @@ describe('Header accessibility', () => {
     });
   });
 
+  it('renders a Bangla/English language switcher, defaulting to bn as the active language', () => {
+    const markup = renderHeader();
+    expect(markup).toContain('aria-label="Language"');
+    expect(markup).toContain('বাংলা');
+    expect(markup).toContain('English');
+    // bn is active (the bare/default path) and is not itself a link.
+    expect(markup).toContain('aria-current="true"');
+  });
+
+  it('links to the English homepage under the /en prefix', () => {
+    const markup = renderHeader();
+    expect(markup).toContain('href="/en"');
+  });
 });

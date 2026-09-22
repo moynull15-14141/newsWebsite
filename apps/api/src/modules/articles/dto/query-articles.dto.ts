@@ -50,4 +50,8 @@ export class QueryArticlesDto {
   @IsOptional()
   @IsString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsString()
+  languageId?: string;
 }

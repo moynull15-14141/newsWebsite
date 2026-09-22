@@ -253,6 +253,63 @@ describe('SectionCard', () => {
     const custom = section('custom-1', 'CUSTOM', ['a1'], { title: 'Special Coverage', category: { id: 'c9', name: 'Politics', slug: 'politics' }, categoryId: 'c9' });
     expect(card({ section: custom })).toContain('Links to Politics');
   });
+
+  describe('automatically sourced sections', () => {
+    const auto = (overrides: Partial<Parameters<typeof section>[3]> = {}) =>
+      section('politics', 'POLITICS', [], {
+        title: 'Politics',
+        sourceType: 'CATEGORY',
+        categoryId: 'c9',
+        category: { id: 'c9', name: 'Politics', slug: 'politics' },
+        maxItems: 6,
+        ...overrides,
+      });
+
+    it('marks the section as automatic and names its source', () => {
+      const markup = card({ section: auto() });
+      expect(markup).toContain('Auto');
+      expect(markup).toContain('Category: Politics');
+      expect(markup).toContain('Up to 6 stories');
+      expect(markup).not.toContain('of 6 stories');
+    });
+
+    it('explains that it fills itself instead of offering an empty-section prompt', () => {
+      const markup = card({ section: auto() });
+      expect(markup).toContain('fills itself from');
+      expect(markup).not.toContain('No stories yet.');
+    });
+
+    it('hides the Add stories control, because placements are not used', () => {
+      expect(button(card({ section: auto() }), /Add stories/)).toBe('');
+    });
+
+    it('names a tag source and a location source', () => {
+      expect(card({ section: auto({ sourceType: 'TAG', categoryId: null, category: null, tagId: 't1', tag: { id: 't1', name: 'Election', slug: 'election' } }) })).toContain('Tag: Election');
+      expect(card({ section: auto({ sourceType: 'LOCATION', categoryId: null, category: null, locationId: 'l1', location: { id: 'l1', name: 'Dhaka', slug: 'dhaka', type: 'DIVISION' } }) })).toContain('Location: Dhaka');
+    });
+
+    it('says the source is not set when an automatic section lost its link', () => {
+      expect(card({ section: auto({ categoryId: null, category: null }) })).toContain('Category: not set');
+    });
+
+    it('describes a LATEST-sourced section without needing a link', () => {
+      const markup = card({ section: auto({ sourceType: 'LATEST', categoryId: null, category: null }) });
+      expect(markup).toContain('Latest published');
+      expect(markup).not.toContain('not set');
+    });
+
+    it('still lets the section be reordered, hidden, edited and deleted', () => {
+      const markup = card({ section: auto() });
+      expect(button(markup, /Move section “Politics” up/)).not.toMatch(/disabled/);
+      expect(markup).toContain('role="switch"');
+      expect(button(markup, /Edit section “Politics”/)).not.toMatch(/disabled/);
+      expect(button(markup, /Delete section “Politics”/)).not.toMatch(/disabled/);
+    });
+
+    it('names a forced card presentation', () => {
+      expect(card({ section: auto({ cardVariant: 'opinion' }) })).toContain('Opinion (accent rule)');
+    });
+  });
 });
 
 describe('Draft preview', () => {
@@ -276,6 +333,28 @@ describe('Draft preview', () => {
     expect(markup).toContain('>Special Coverage<');
     expect(markup).toContain('grid-cols-3'); // THREE_UP on desktop
     expect(markup).toContain('data-preview-mode="desktop"');
+  });
+
+  it('previews each layout preset with its own composition, not the default', () => {
+    const three = ['x1', 'x2', 'x3', 'x4'].map((id) => ({ id, title: `Story ${id}`, slug: id }));
+    const preview = (layout: string) =>
+      renderToStaticMarkup(<PreviewCanvas data={{ ...data, sectionList: [{ key: 'k', type: 'CUSTOM', title: 'Section', layout, category: null, articles: three }] }} mode="desktop" />);
+
+    expect(preview('TWO_UP')).toContain('grid-cols-2');
+    expect(preview('FOUR_UP')).toContain('grid-cols-4');
+    expect(preview('GRID')).toContain('grid-cols-3');
+    expect(preview('HORIZONTAL_LIST')).toContain('divide-y');
+    expect(preview('TEXT_LED')).toContain('grid-cols-3');
+    expect(preview('IMAGE_LED')).toContain('Story x1');
+    // Unknown stored values fall back to the default composition, as the API normalizes them.
+    expect(preview('MOSAIC_XL')).toContain('grid-cols-[3fr_2fr]');
+  });
+
+  it('caps fixed-column previews the same way the public page does', () => {
+    const five = ['y1', 'y2', 'y3', 'y4', 'y5'].map((id) => ({ id, title: `Story ${id}`, slug: id }));
+    const markup = renderToStaticMarkup(<PreviewCanvas data={{ ...data, sectionList: [{ key: 'k', type: 'CUSTOM', title: 'Section', layout: 'TWO_UP', category: null, articles: five }] }} mode="desktop" />);
+    expect(markup).toContain('Story y2');
+    expect(markup).not.toContain('Story y3');
   });
 
   it('has a distinct mobile presentation that collapses the multi-column layouts', () => {

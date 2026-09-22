@@ -52,6 +52,47 @@ describe('homepage section selection', () => {
     expect(selectHomepageSections(undefined)).toEqual([]);
     expect(selectHomepageSections({})).toEqual([]);
   });
+
+  it('carries the card presentation through, defaulting to AUTO when the API omits it', () => {
+    const sections = selectHomepageSections({
+      sectionList: [
+        { key: 'opinion', type: 'CUSTOM', title: 'Opinion', layout: 'TEXT_LED', cardVariant: 'opinion', category: null, articles: [story('a')] },
+        { key: 'legacy', type: 'CUSTOM', title: 'Legacy', layout: 'THREE_UP', category: null, articles: [story('b')] },
+      ],
+    });
+    expect(sections.map((s) => s.cardVariant)).toEqual(['opinion', 'AUTO']);
+  });
+
+  it('links a tag-sourced section to its tag page and a location-sourced one to its location page', () => {
+    const sections = selectHomepageSections({
+      sectionList: [
+        { key: 'election', type: 'CUSTOM', title: 'Election', layout: 'GRID', sourceType: 'TAG', category: null, tag: { id: 't1', name: 'Election', slug: 'election' }, articles: [story('a')] },
+        { key: 'dhaka', type: 'CUSTOM', title: 'Dhaka', layout: 'GRID', sourceType: 'LOCATION', category: null, location: { id: 'l1', name: 'Dhaka', slug: 'dhaka', type: 'DIVISION' }, articles: [story('b')] },
+      ],
+    });
+    expect(sections.map((s) => s.href)).toEqual(['/tag/election', '/location/dhaka']);
+  });
+
+  it('prefers a category link over tag and location links', () => {
+    const sections = selectHomepageSections({
+      sectionList: [{
+        key: 'mixed',
+        type: 'CUSTOM',
+        title: 'Mixed',
+        layout: 'GRID',
+        category: { id: 'c1', name: 'Politics', slug: 'politics' },
+        tag: { id: 't1', name: 'Election', slug: 'election' },
+        location: { id: 'l1', name: 'Dhaka', slug: 'dhaka', type: 'DIVISION' },
+        articles: [story('a')],
+      }],
+    });
+    expect(sections[0].href).toBe('/category/politics');
+  });
+
+  it('gives legacy sections the AUTO card variant', () => {
+    const sections = selectHomepageSections({ sections: { world: [story('a')] } });
+    expect(sections[0].cardVariant).toBe('AUTO');
+  });
 });
 
 describe('editorial homepage selection', () => {

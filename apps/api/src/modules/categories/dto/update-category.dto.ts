@@ -1,4 +1,6 @@
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { CategoryTranslationDto } from './category-translation.dto';
 
 export class UpdateCategoryDto {
   @IsOptional()
@@ -30,5 +32,13 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsEnum(['ACTIVE', 'INACTIVE'])
   status?: 'ACTIVE' | 'INACTIVE';
+
+  /** Replaces the full translation set when present (omit the field to leave translations untouched). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CategoryTranslationDto)
+  translations?: CategoryTranslationDto[];
 }
 

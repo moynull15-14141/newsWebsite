@@ -5,8 +5,11 @@ import { ArticleViewService } from '../articles/services/article-view.service';
 import { TrendingService } from '../articles/services/trending.service';
 import { MostReadService } from '../articles/services/most-read.service';
 import { BreakingNewsService } from '../articles/services/breaking-news.service';
+import { LanguagesService } from '../languages/languages.service';
 import { loadConfiguredSections, serializeHomepageSections } from '../homepage/homepage.serializer';
+import { resolveSectionArticles } from '../homepage/homepage.section-resolver';
 import { ARTICLE_SELECT } from './public-article-select';
+import { articleLanguageWhere } from '../../common/i18n/article-language';
 
 const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_SELECT,
@@ -25,15 +28,23 @@ export class PublicService {
     private readonly trendingService: TrendingService,
     private readonly mostReadService: MostReadService,
     private readonly breakingNewsService: BreakingNewsService,
+    private readonly languagesService: LanguagesService,
   ) {}
 
+  /**
+   * Every public article listing goes through here, and every one resolves `?lang=` the same way:
+   * an unknown/omitted/disabled code falls back to the platform default rather than 404ing or
+   * silently mixing languages. Legacy rows with no `languageId` count as the default language.
+   */
   async getArticles(query: PublicArticleQueryDto, extraWhere: any = {}): Promise<{ data: any[]; meta: { page: number; limit: number; total: number; totalPages: number } }> {
-    const { page = 1, limit = 20, search, sort = 'publishedAt', order = 'desc' } = query;
+    const { page = 1, limit = 20, search, sort = 'publishedAt', order = 'desc', lang } = query;
     const skip = (page - 1) * limit;
+    const language = await this.languagesService.resolveRequested(lang);
 
     const where: any = {
       status: 'PUBLISHED',
       ...extraWhere,
+      AND: [articleLanguageWhere(language), ...(extraWhere.AND ?? [])],
     };
 
     if (search) {
@@ -62,6 +73,12 @@ export class PublicService {
     };
   }
 
+  /**
+   * Slug lookup is language-agnostic on purpose: each language version of a story has its OWN slug, so
+   * the slug alone already picks the language. `translations` lists the PUBLISHED sibling versions (in
+   * other languages) so the reader can switch, and SEO can emit hreflang — draft siblings are never
+   * exposed publicly.
+   */
   async getArticleBySlug(slug: string): Promise<any> {
     const article = await this.prisma.article.findUnique({
       where: { slug, status: 'PUBLISHED' },
@@ -72,7 +89,14 @@ export class PublicService {
       throw new NotFoundException('Article not found');
     }
 
-    return article;
+    const translations = article.translationGroupId
+      ? await this.prisma.article.findMany({
+          where: { translationGroupId: article.translationGroupId, status: 'PUBLISHED', id: { not: article.id } },
+          select: { slug: true, title: true, language: { select: { code: true, name: true, nativeName: true } } },
+        })
+      : [];
+
+    return { ...article, translations };
   }
 
   async getArticlesByCategory(categorySlug: string, query: PublicArticleQueryDto): Promise<{ data: any[]; meta: { page: number; limit: number; total: number; totalPages: number } }> {
@@ -145,8 +169,9 @@ export class PublicService {
     return this.getArticles(rest, extraWhere);
   }
 
-  async getBreakingNews(limit = 5) {
-    return this.breakingNewsService.getActiveBreakingNews(limit);
+  async getBreakingNews(limit = 5, langCode?: string) {
+    const language = await this.languagesService.resolveRequested(langCode);
+    return this.breakingNewsService.getActiveBreakingNews(limit, language);
   }
 
   async trackView(articleSlug: string, fingerprint?: string) {
@@ -158,20 +183,25 @@ export class PublicService {
     return this.articleViewService.recordView(article.id, undefined, fingerprint);
   }
 
-  async getMostRead(options: { limit?: number; window?: 'today' | '24h' | '7d' } = {}) {
-    return this.mostReadService.getMostRead(options);
+  async getMostRead(options: { limit?: number; window?: 'today' | '24h' | '7d'; lang?: string } = {}) {
+    const language = await this.languagesService.resolveRequested(options.lang);
+    return this.mostReadService.getMostRead({ ...options, language });
   }
 
-  async getTrending(options: { limit?: number; locationSlug?: string } = {}) {
-    return this.trendingService.getTrending(options);
+  async getTrending(options: { limit?: number; locationSlug?: string; lang?: string } = {}) {
+    const language = await this.languagesService.resolveRequested(options.lang);
+    return this.trendingService.getTrending({ ...options, language });
   }
 
-  async getRelatedArticles(articleId: string, categoryId?: string, tagIds?: string[], locationId?: string) {
+  /** Related stories stay in the same language as the article being read — a reader of the English
+   * story should never be offered Bangla-only "related" links they cannot read. */
+  async getRelatedArticles(articleId: string, categoryId?: string, tagIds?: string[], locationId?: string, languageId?: string | null) {
     const where: any = {
       status: 'PUBLISHED',
       id: { not: articleId },
       OR: [],
     };
+    if (languageId !== undefined) where.languageId = languageId;
 
     if (categoryId) {
       where.OR.push({ categoryId });
@@ -199,28 +229,38 @@ export class PublicService {
    * Public homepage. Reads ONLY the ACTIVE configuration — never the editable draft. Editors' draft
    * edits are invisible here until HomepageService.publish() atomically replaces the ACTIVE sections.
    */
-  async getHomepageData() {
+  async getHomepageData(langCode?: string) {
+    const language = await this.languagesService.resolveRequested(langCode);
     const { sections } = await loadConfiguredSections(this.prisma, 'ACTIVE');
-    return this.buildHomepage(sections);
+    return this.buildHomepage(sections, new Date(), language);
   }
 
   /**
    * Shared composition used by the public endpoint and the admin draft preview so both return the same
    * contract. `configuredSections` is a loaded configuration (see loadConfiguredSections); when it has
    * no enabled sections the dynamic latest/category fallback is returned instead.
-   * Trending, most-read and breaking news stay algorithmic in both cases.
+   *
+   * Every section's stories — editor-picked placements and automatic category/tag/location/latest
+   * sources alike — are resolved in one centralized pass before serialization, so the public homepage
+   * and the admin draft preview always agree and no section fetches its own content. `language` decides
+   * which article variant each section (and the fallback path) shows; trending, most-read and breaking
+   * news stay algorithmic but are filtered to the same language.
    */
-  async buildHomepage(configuredSections: any[]) {
+  async buildHomepage(configuredSections: any[], now: Date = new Date(), language?: { id: string; code: string; isDefault: boolean }) {
+    const resolvedLanguage = language ?? (await this.languagesService.getDefault());
+
     if (configuredSections.length) {
-      const { hero, latest, sections, sectionList } = serializeHomepageSections(configuredSections);
+      const resolved = await resolveSectionArticles(this.prisma, configuredSections, now, resolvedLanguage);
+      const { hero, latest, sections, sectionList } = serializeHomepageSections(configuredSections, resolved, now, resolvedLanguage.code);
       const [breakingNews, trending, mostRead] = await Promise.all([
-        this.breakingNewsService.getActiveBreakingNews(5),
-        this.trendingService.getTrending({ limit: 6 }),
-        this.mostReadService.getMostRead({ limit: 6, window: '24h' }),
+        this.breakingNewsService.getActiveBreakingNews(5, resolvedLanguage),
+        this.trendingService.getTrending({ limit: 6, language: resolvedLanguage }),
+        this.mostReadService.getMostRead({ limit: 6, window: '24h', language: resolvedLanguage }),
       ]);
       return { hero, breakingNews, latest, trending, mostRead, sections, sectionList };
     }
 
+    const langQuery = { lang: resolvedLanguage.code };
     const [
       hero,
       latest,
@@ -236,26 +276,26 @@ export class PublicService {
       entertainment,
     ] = await Promise.all([
       this.prisma.article.findFirst({
-        where: { status: 'PUBLISHED' },
+        where: { status: 'PUBLISHED', ...articleLanguageWhere(resolvedLanguage) },
         orderBy: { publishedAt: 'desc' },
         select: ARTICLE_SELECT,
       }),
       this.prisma.article.findMany({
-        where: { status: 'PUBLISHED' },
+        where: { status: 'PUBLISHED', ...articleLanguageWhere(resolvedLanguage) },
         take: 10,
         orderBy: { publishedAt: 'desc' },
         select: ARTICLE_SELECT,
       }),
-      this.breakingNewsService.getActiveBreakingNews(5),
-      this.trendingService.getTrending({ limit: 6 }),
-      this.mostReadService.getMostRead({ limit: 6, window: '24h' }),
-      this.getArticlesByCategory('bangladesh', { limit: 6 }),
-      this.getArticlesByCategory('world', { limit: 6 }),
-      this.getArticlesByCategory('politics', { limit: 6 }),
-      this.getArticlesByCategory('business', { limit: 6 }),
-      this.getArticlesByCategory('sports', { limit: 6 }),
-      this.getArticlesByCategory('technology', { limit: 6 }),
-      this.getArticlesByCategory('entertainment', { limit: 6 }),
+      this.breakingNewsService.getActiveBreakingNews(5, resolvedLanguage),
+      this.trendingService.getTrending({ limit: 6, language: resolvedLanguage }),
+      this.mostReadService.getMostRead({ limit: 6, window: '24h', language: resolvedLanguage }),
+      this.getArticlesByCategory('bangladesh', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('world', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('politics', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('business', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('sports', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('technology', { limit: 6, ...langQuery } as PublicArticleQueryDto),
+      this.getArticlesByCategory('entertainment', { limit: 6, ...langQuery } as PublicArticleQueryDto),
     ]);
 
     return {

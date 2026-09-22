@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { articleLanguageWhere, LanguageFilter } from '../../../common/i18n/article-language';
 
 @Injectable()
 export class BreakingNewsService {
@@ -38,7 +39,13 @@ export class BreakingNewsService {
     });
   }
 
-  async getActiveBreakingNews(limit = 5) {
+  /**
+   * `language` is optional so existing callers (and tests) keep working across every configured
+   * language. It is combined via `AND` rather than spread — the language filter can itself be an `OR`
+   * (default language also matches legacy null rows), which would silently overwrite the breaking-news
+   * expiry `OR` clause if merged by object spread instead.
+   */
+  async getActiveBreakingNews(limit = 5, language?: LanguageFilter) {
     const now = new Date();
     return this.prisma.article.findMany({
       where: {
@@ -48,6 +55,7 @@ export class BreakingNewsService {
           { breakingEndsAt: null },
           { breakingEndsAt: { gt: now } },
         ],
+        ...(language ? { AND: [articleLanguageWhere(language)] } : {}),
       },
       orderBy: [
         { breakingPriority: 'desc' },

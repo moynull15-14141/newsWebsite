@@ -208,7 +208,17 @@ export default function HomepagePage() {
           busy={!!pending}
           onClose={closeDialogs}
           onReload={reload}
-          onSubmit={(values) => builder.createSection({ type: values.type, title: values.title, layoutType: values.layoutType, maxItems: values.maxItems, ...(values.categoryId ? { categoryId: values.categoryId } : {}) })}
+          onSubmit={(values) => builder.createSection({
+            type: values.type,
+            title: values.title,
+            layoutType: values.layoutType,
+            cardVariant: values.cardVariant,
+            maxItems: values.maxItems,
+            sourceType: values.sourceType,
+            ...(values.categoryId ? { categoryId: values.categoryId } : {}),
+            ...(values.tagId ? { tagId: values.tagId } : {}),
+            ...(values.locationId ? { locationId: values.locationId } : {}),
+          })}
         />
       )}
       {sectionDialog?.mode === 'edit' && editing && (
@@ -222,8 +232,14 @@ export default function HomepagePage() {
             const patch = {
               ...(values.title !== editing.title ? { title: values.title } : {}),
               ...(values.layoutType !== editing.layoutType ? { layoutType: values.layoutType } : {}),
+              ...(values.cardVariant !== editing.cardVariant ? { cardVariant: values.cardVariant } : {}),
               ...(editing.type !== 'HERO' && values.maxItems !== editing.maxItems ? { maxItems: values.maxItems } : {}),
-              ...(editing.type === 'CUSTOM' && values.categoryId !== editing.categoryId ? { categoryId: values.categoryId } : {}),
+              ...(values.sourceType !== editing.sourceType ? { sourceType: values.sourceType } : {}),
+              // Links are sent whenever they differ, including when cleared, so switching source never
+              // leaves a stale category/tag/location behind.
+              ...(values.categoryId !== editing.categoryId ? { categoryId: values.categoryId } : {}),
+              ...(values.tagId !== editing.tagId ? { tagId: values.tagId } : {}),
+              ...(values.locationId !== editing.locationId ? { locationId: values.locationId } : {}),
             };
             return Object.keys(patch).length ? builder.updateSection(editing, patch) : ({ ok: true } as ActionResult);
           }}

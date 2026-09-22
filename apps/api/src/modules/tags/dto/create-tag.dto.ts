@@ -1,4 +1,6 @@
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsEnum, IsOptional, IsString, MaxLength, MinLength, ValidateNested } from 'class-validator';
+import { TagTranslationDto } from './tag-translation.dto';
 
 export class CreateTagDto {
   @IsString()
@@ -14,5 +16,11 @@ export class CreateTagDto {
   @IsOptional()
   @IsEnum(['ACTIVE', 'INACTIVE'])
   status?: 'ACTIVE' | 'INACTIVE';
-}
 
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => TagTranslationDto)
+  translations?: TagTranslationDto[];
+}

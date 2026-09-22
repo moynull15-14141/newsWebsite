@@ -3,19 +3,29 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { QueryArticlesDto } from './dto/query-articles.dto';
+import { LanguagesService } from '../languages/languages.service';
 import { ArticleStatus } from '@prisma/client';
+
+const LANGUAGE_SELECT = { select: { id: true, code: true, name: true, nativeName: true } } as const;
 
 @Injectable()
 export class ArticlesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly languagesService: LanguagesService,
+  ) {}
 
   async create(dto: CreateArticleDto, authorId: string) {
     const slug = dto.slug || this.slugify(dto.title);
-    
+
     const existing = await this.prisma.article.findUnique({ where: { slug } });
     if (existing) {
       throw new BadRequestException('Article with this slug already exists');
     }
+
+    // Every article belongs to a language; the editor rarely needs to choose — the platform default
+    // covers the common case, and translations get their own explicit language via createTranslation().
+    const languageId = dto.languageId ?? (await this.languagesService.getDefault()).id;
 
     const article = await this.prisma.article.create({
       data: {
@@ -32,6 +42,7 @@ export class ArticlesService {
         categoryId: dto.categoryId,
         locationId: dto.locationId,
         featuredImageId: dto.featuredImageId,
+        languageId,
         status: 'DRAFT',
         isBreaking: dto.isBreaking,
         breakingPriority: dto.breakingPriority,
@@ -45,6 +56,7 @@ export class ArticlesService {
         author: { select: { id: true, name: true, email: true } },
         category: true,
         location: true,
+        language: LANGUAGE_SELECT,
         articleTags: { include: { tag: true } },
       },
     });
@@ -53,7 +65,7 @@ export class ArticlesService {
   }
 
   async findAll(query: QueryArticlesDto, userId?: string, userPermissions?: string[]) {
-    const { page = 1, limit = 20, search, status, categoryId, locationId, authorId, tagId, sort = 'createdAt', order = 'desc' } = query;
+    const { page = 1, limit = 20, search, status, categoryId, locationId, authorId, tagId, languageId, sort = 'createdAt', order = 'desc' } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -81,6 +93,10 @@ export class ArticlesService {
       where.articleTags = { some: { tagId } };
     }
 
+    if (languageId) {
+      where.languageId = languageId;
+    }
+
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
@@ -100,6 +116,7 @@ export class ArticlesService {
           author: { select: { id: true, name: true, email: true } },
           category: { select: { id: true, name: true, slug: true } },
           location: { select: { id: true, name: true, slug: true, type: true } },
+          language: LANGUAGE_SELECT,
           articleTags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
           // Featured image, so catalogue consumers (e.g. the homepage article picker) can show a thumbnail.
           media: { select: { id: true, publicUrl: true, altText: true } },
@@ -128,6 +145,7 @@ export class ArticlesService {
         location: true,
         media: { select: { id: true, publicUrl: true, originalFilename: true, altText: true } },
         reviewedBy: { select: { id: true, name: true, email: true } },
+        language: LANGUAGE_SELECT,
         articleTags: { include: { tag: true } },
       },
     });
@@ -148,6 +166,7 @@ export class ArticlesService {
         location: true,
         media: { select: { id: true, publicUrl: true, originalFilename: true, altText: true } },
         reviewedBy: { select: { id: true, name: true, email: true } },
+        language: LANGUAGE_SELECT,
         articleTags: { include: { tag: true } },
       },
     });
@@ -187,6 +206,7 @@ export class ArticlesService {
     if (dto.breakingPriority !== undefined) updateData.breakingPriority = dto.breakingPriority;
     if (dto.breakingEndsAt !== undefined) updateData.breakingEndsAt = dto.breakingEndsAt ? new Date(dto.breakingEndsAt) : null;
     if (dto.scheduledAt !== undefined) updateData.scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
+    if (dto.languageId !== undefined) updateData.languageId = dto.languageId;
 
     if (dto.tagIds !== undefined) {
       await this.prisma.articleTag.deleteMany({ where: { articleId: id } });
@@ -204,6 +224,7 @@ export class ArticlesService {
         author: { select: { id: true, name: true, email: true } },
         category: true,
         location: true,
+        language: LANGUAGE_SELECT,
         articleTags: { include: { tag: true } },
       },
     });
@@ -488,6 +509,76 @@ export class ArticlesService {
       viewsToday,
       mostRead,
     };
+  }
+
+  /**
+   * Creates a new-language DRAFT sibling of `articleId`: a real, independent Article row that the
+   * editor writes fresh content into, linked by `translationGroupId` so the two are known to be
+   * translations of the same story (not guessed from a matching title/slug). Taxonomy (category,
+   * location, tags, featured image) carries over as a starting point; title/slug/excerpt/content/SEO do
+   * NOT — those are for the target language and start blank so nothing untranslated is ever visible.
+   * The new article's own publication status is independent from the source's (Part 13/25).
+   */
+  async createTranslation(articleId: string, languageId: string, authorId: string) {
+    const source = await this.prisma.article.findUnique({
+      where: { id: articleId },
+      include: { articleTags: true },
+    });
+    if (!source) throw new NotFoundException('Article not found');
+
+    const language = await this.prisma.language.findUnique({ where: { id: languageId } });
+    if (!language) throw new NotFoundException('Language not found');
+    if (source.languageId === languageId) {
+      throw new BadRequestException('This article is already in that language.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const groupId =
+        source.translationGroupId ??
+        (await tx.article.update({ where: { id: source.id }, data: { translationGroup: { create: {} } }, select: { translationGroupId: true } }))
+          .translationGroupId!;
+
+      const existingSibling = await tx.article.findFirst({ where: { translationGroupId: groupId, languageId } });
+      if (existingSibling) {
+        throw new BadRequestException(`A ${language.name} translation already exists for this story.`);
+      }
+
+      const placeholderTitle = `(${language.nativeName} translation of "${source.title}")`;
+      return tx.article.create({
+        data: {
+          title: placeholderTitle,
+          slug: this.slugify(placeholderTitle),
+          authorId,
+          languageId,
+          translationGroupId: groupId,
+          categoryId: source.categoryId,
+          locationId: source.locationId,
+          featuredImageId: source.featuredImageId,
+          status: 'DRAFT',
+          articleTags: source.articleTags.length ? { create: source.articleTags.map((t) => ({ tagId: t.tagId })) } : undefined,
+        },
+        include: {
+          author: { select: { id: true, name: true, email: true } },
+          category: true,
+          location: true,
+          language: LANGUAGE_SELECT,
+          articleTags: { include: { tag: true } },
+        },
+      });
+    });
+  }
+
+  /** Every language version of the same story (the article itself plus its siblings), for the admin translation panel. */
+  async getTranslations(articleId: string) {
+    const article = await this.prisma.article.findUnique({ where: { id: articleId }, select: { translationGroupId: true, languageId: true } });
+    if (!article) throw new NotFoundException('Article not found');
+    if (!article.translationGroupId) return [];
+
+    return this.prisma.article.findMany({
+      where: { translationGroupId: article.translationGroupId },
+      select: { id: true, title: true, slug: true, status: true, publishedAt: true, language: LANGUAGE_SELECT },
+      orderBy: { language: { sortOrder: 'asc' } },
+    });
   }
 
   private slugify(text: string): string {

@@ -39,12 +39,32 @@ export interface DraftRequest {
 
 /** Request builders: each receives the current draft version and produces the API call. */
 export const draftRequests = {
-  createSection: (input: { type: string; title: string; layoutType?: string; maxItems?: number; categoryId?: string }) => (version: number): DraftRequest => ({
+  createSection: (input: {
+    type: string;
+    title: string;
+    layoutType?: string;
+    cardVariant?: string;
+    maxItems?: number;
+    sourceType?: string;
+    categoryId?: string;
+    tagId?: string;
+    locationId?: string;
+  }) => (version: number): DraftRequest => ({
     path: PATHS.sections,
     method: 'POST',
     body: { expectedVersion: version, ...input },
   }),
-  updateSection: (id: string, patch: { title?: string; enabled?: boolean; layoutType?: string; maxItems?: number; categoryId?: string | null }) => (version: number): DraftRequest => ({
+  updateSection: (id: string, patch: {
+    title?: string;
+    enabled?: boolean;
+    layoutType?: string;
+    cardVariant?: string;
+    maxItems?: number;
+    sourceType?: string;
+    categoryId?: string | null;
+    tagId?: string | null;
+    locationId?: string | null;
+  }) => (version: number): DraftRequest => ({
     path: `${PATHS.sections}/${id}`,
     method: 'PATCH',
     body: { expectedVersion: version, ...patch },

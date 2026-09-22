@@ -38,7 +38,10 @@ describe('LocationsService', () => {
   });
 
   it('creates location with composite identityKey', async () => {
-    prisma.location.findUnique.mockResolvedValue(null);
+    // create() looks up twice: the identityKey must be free, and the parent must exist.
+    prisma.location.findUnique.mockImplementation(({ where }: any) =>
+      Promise.resolve(where.identityKey ? null : { id: where.id, name: 'Dhaka', type: 'DISTRICT' }),
+    );
     prisma.location.create.mockResolvedValue({
       id: 'loc-1',
       name: 'Mirpur',
@@ -56,6 +59,12 @@ describe('LocationsService', () => {
 
     expect(result.id).toBe('loc-1');
     expect(prisma.location.create).toHaveBeenCalled();
+  });
+
+  it('refuses to create a child of a parent that does not exist', async () => {
+    prisma.location.findUnique.mockResolvedValue(null); // identityKey free, parent missing
+    await expect(service.create({ name: 'Mirpur', slug: 'mirpur', type: 'UPAZILA', parentId: 'missing' } as any)).rejects.toThrow(NotFoundException);
+    expect(prisma.location.create).not.toHaveBeenCalled();
   });
 
   it('throws ConflictException if identityKey already exists', async () => {

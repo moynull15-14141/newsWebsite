@@ -1,6 +1,11 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 
+/** Appends `?lang=` (or `&lang=`) to a `/public/*` request path — every such DTO accepts it (see PublicArticleQueryDto). */
+export function withLang(endpoint: string, code: string): string {
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}lang=${encodeURIComponent(code)}`;
+}
+
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const auth = useReaderAuthStore.getState();
   const headers = { 'Content-Type': 'application/json', ...(options?.headers || {}), ...(auth.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) };

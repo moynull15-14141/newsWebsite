@@ -4,6 +4,11 @@ import { Tag as TagIcon, Plus, Edit, Trash2, Search, X, Check, AlertCircle, Refr
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 
+interface TagTranslation {
+  languageId: string;
+  name: string;
+}
+
 interface TagItem {
   id: string;
   name: string;
@@ -11,6 +16,14 @@ interface TagItem {
   status: 'ACTIVE' | 'INACTIVE';
   createdAt: string;
   _count?: { articleTags: number };
+  translations?: TagTranslation[];
+}
+
+interface LanguageOption {
+  id: string;
+  code: string;
+  name: string;
+  nativeName: string;
 }
 
 interface TagsResponse {
@@ -47,6 +60,7 @@ export default function TagsPage() {
   const [slug, setSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [status, setStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [translationNames, setTranslationNames] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery<TagsResponse>({
@@ -59,8 +73,10 @@ export default function TagsPage() {
       ),
   });
 
+  const { data: languages = [] } = useQuery<LanguageOption[]>({ queryKey: ['languages'], queryFn: () => apiFetch('/languages') });
+
   const createMutation = useMutation({
-    mutationFn: (payload: { name: string; slug: string; status: string }) =>
+    mutationFn: (payload: { name: string; slug: string; status: string; translations?: TagTranslation[] }) =>
       apiFetch('/tags', { method: 'POST', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags-admin'] });
@@ -73,7 +89,7 @@ export default function TagsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...payload }: { id: string; name: string; slug: string; status: string }) =>
+    mutationFn: ({ id, ...payload }: { id: string; name: string; slug: string; status: string; translations?: TagTranslation[] }) =>
       apiFetch(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags-admin'] });
@@ -102,6 +118,7 @@ export default function TagsPage() {
     setSlug('');
     setSlugManuallyEdited(false);
     setStatus('ACTIVE');
+    setTranslationNames({});
     setFormError(null);
     setModalOpen(true);
   };
@@ -112,6 +129,7 @@ export default function TagsPage() {
     setSlug(tag.slug);
     setSlugManuallyEdited(true);
     setStatus(tag.status);
+    setTranslationNames(Object.fromEntries((tag.translations ?? []).map((t) => [t.languageId, t.name])));
     setFormError(null);
     setModalOpen(true);
   };
@@ -140,10 +158,15 @@ export default function TagsPage() {
       return;
     }
 
+    const translations = languages
+      .map((lang) => ({ languageId: lang.id, name: (translationNames[lang.id] || '').trim() }))
+      .filter((t) => t.name);
+
     const payload = {
       name: name.trim(),
       slug: slug.trim().toLowerCase(),
       status,
+      translations,
     };
 
     if (editingTag) {
@@ -410,6 +433,26 @@ export default function TagsPage() {
                   <option value="INACTIVE">INACTIVE</option>
                 </select>
               </div>
+
+              {languages.length > 0 && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-gray-700">Localized names</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Optional — the same tag, shown in each language.</p>
+                  <div className="mt-2 space-y-2">
+                    {languages.map((lang) => (
+                      <label key={lang.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-16 shrink-0 text-xs font-semibold text-gray-500">{lang.nativeName}</span>
+                        <input
+                          value={translationNames[lang.id] || ''}
+                          onChange={(e) => setTranslationNames({ ...translationNames, [lang.id]: e.target.value })}
+                          placeholder={lang.code === 'bn' ? 'যেমন নির্বাচন' : name || lang.name}
+                          className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
                 <button

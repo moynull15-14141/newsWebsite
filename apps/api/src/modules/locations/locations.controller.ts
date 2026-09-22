@@ -34,6 +34,13 @@ export class LocationsController {
     return this.locationsService.findTree();
   }
 
+  /** Generic recursive tree covering every root (continents, and any top-level country). */
+  @Get('global-tree')
+  @Public()
+  findGlobalTree() {
+    return this.locationsService.findGlobalTree();
+  }
+
   @Get('id/:id')
   @RequirePermissions('settings.manage')
   findById(@Param('id') id: string) {

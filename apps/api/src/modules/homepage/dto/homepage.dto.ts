@@ -1,4 +1,4 @@
-import { HomepageSectionType } from '@prisma/client';
+import { HomepageSectionType, HomepageSourceType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -14,7 +14,12 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { HOMEPAGE_LAYOUT_PRESETS, MAX_SECTIONS_PER_CONFIGURATION, MAX_SECTION_ITEMS } from '../homepage.constants';
+import {
+  HOMEPAGE_CARD_VARIANTS,
+  HOMEPAGE_LAYOUT_PRESETS,
+  MAX_SECTIONS_PER_CONFIGURATION,
+  MAX_SECTION_ITEMS,
+} from '../homepage.constants';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -29,8 +34,12 @@ export class CreateHomepageSectionDto extends VersionedDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_SECTION_ITEMS) maxItems?: number;
   @IsOptional() @IsIn([...HOMEPAGE_LAYOUT_PRESETS]) layoutType?: string;
+  @IsOptional() @IsIn([...HOMEPAGE_CARD_VARIANTS]) cardVariant?: string;
+  /** Where the section's stories come from. Defaults to MANUAL (editor-picked placements). */
+  @IsOptional() @IsEnum(HomepageSourceType) sourceType?: HomepageSourceType;
   @IsOptional() @IsString() categoryId?: string;
   @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() tagId?: string;
 }
 
 /** Section identity (type/key) and position are immutable here; position changes go through reorder. */
@@ -39,9 +48,13 @@ export class UpdateHomepageSectionDto extends VersionedDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_SECTION_ITEMS) maxItems?: number;
   @IsOptional() @IsIn([...HOMEPAGE_LAYOUT_PRESETS]) layoutType?: string;
+  @IsOptional() @IsIn([...HOMEPAGE_CARD_VARIANTS]) cardVariant?: string;
+  /** Switching away from MANUAL clears the section's placements. */
+  @IsOptional() @IsEnum(HomepageSourceType) sourceType?: HomepageSourceType;
   /** null clears the link. */
   @IsOptional() @IsString() categoryId?: string | null;
   @IsOptional() @IsString() locationId?: string | null;
+  @IsOptional() @IsString() tagId?: string | null;
 }
 
 export class ReorderHomepageSectionsDto extends VersionedDto {

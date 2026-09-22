@@ -1,6 +1,7 @@
 import ArticleCard from './ArticleCard';
 import { SectionHeading } from './SectionHeading';
 import { Button } from './Button';
+import { useLanguage } from '@/lib/i18n';
 
 interface Article {
   id: string;
@@ -41,10 +42,12 @@ export default function ArticleList({
   meta,
   onPageChange,
 }: ArticleListProps) {
+  const { t } = useLanguage();
+
   if (!articles.length) {
     return (
       <div className="py-12 text-center">
-        <p className="text-neutral-500">No articles found.</p>
+        <p className="text-neutral-500">{t('common.noArticlesFound')}</p>
       </div>
     );
   }
@@ -69,7 +72,7 @@ export default function ArticleList({
             variant="secondary"
             size="sm"
           >
-            Previous
+            {t('common.previous')}
           </Button>
 
           {Array.from({ length: Math.min(meta.totalPages, 5) }, (_, i) => {
@@ -102,7 +105,7 @@ export default function ArticleList({
             variant="secondary"
             size="sm"
           >
-            Next
+            {t('common.next')}
           </Button>
         </div>
       )}

@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LanguagesService } from '../languages/languages.service';
 
 const escapeXml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 @Injectable()
 export class SeoService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly languagesService: LanguagesService,
+  ) {}
 
   private get siteUrl() {
     return (process.env.WEB_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -20,6 +24,7 @@ export class SeoService {
   }
 
   async getSitemap() {
+    const defaultLanguage = await this.languagesService.getDefault();
     const urls: { loc: string; lastmod?: Date }[] = [
       { loc: '/' },
       { loc: '/bangladesh' },
@@ -29,12 +34,18 @@ export class SeoService {
     while (true) {
       const articles = await this.prisma.article.findMany({
         where: { status: 'PUBLISHED', noIndex: false, publishedAt: { not: null } },
-        select: { slug: true, updatedAt: true, publishedAt: true },
+        select: { slug: true, updatedAt: true, publishedAt: true, language: { select: { code: true } } },
         orderBy: { publishedAt: 'desc' },
         skip,
         take: pageSize,
       });
-      urls.push(...articles.map((article) => ({ loc: `/article/${article.slug}`, lastmod: article.updatedAt || article.publishedAt || undefined })));
+      urls.push(
+        ...articles.map((article) => {
+          const code = article.language?.code ?? defaultLanguage.code;
+          const prefix = code === defaultLanguage.code ? '' : `/${code}`;
+          return { loc: `${prefix}/article/${article.slug}`, lastmod: article.updatedAt || article.publishedAt || undefined };
+        }),
+      );
       if (articles.length < pageSize) break;
       skip += pageSize;
     }
@@ -43,14 +54,21 @@ export class SeoService {
   }
 
   async getNewsSitemap() {
+    const defaultLanguage = await this.languagesService.getDefault();
     const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const articles = await this.prisma.article.findMany({
       where: { status: 'PUBLISHED', noIndex: false, publishedAt: { gte: since } },
-      select: { slug: true, title: true, publishedAt: true },
+      select: { slug: true, title: true, publishedAt: true, language: { select: { code: true } } },
       orderBy: { publishedAt: 'desc' },
       take: 1000,
     });
-    const body = articles.map((article) => `<url><loc>${escapeXml(`${this.siteUrl}/article/${article.slug}`)}</loc><news:news><news:publication><news:name>${escapeXml(this.publicationName)}</news:name><news:language>en</news:language></news:publication><news:publication_date>${article.publishedAt?.toISOString() || ''}</news:publication><news:title>${escapeXml(article.title)}</news:title></news:news></url>`).join('');
+    const body = articles
+      .map((article) => {
+        const code = article.language?.code ?? defaultLanguage.code;
+        const prefix = code === defaultLanguage.code ? '' : `/${code}`;
+        return `<url><loc>${escapeXml(`${this.siteUrl}${prefix}/article/${article.slug}`)}</loc><news:news><news:publication><news:name>${escapeXml(this.publicationName)}</news:name><news:language>${escapeXml(code)}</news:language></news:publication><news:publication_date>${article.publishedAt?.toISOString() || ''}</news:publication><news:title>${escapeXml(article.title)}</news:title></news:news></url>`;
+      })
+      .join('');
     return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">${body}</urlset>`;
   }
 

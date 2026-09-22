@@ -47,6 +47,17 @@ enum HomepageConfigurationStatus {
   DRAFT
 }
 
+/// Where a homepage section gets its stories from.
+/// MANUAL uses the section's HomepagePlacement rows (editor-picked, ordered).
+/// Every other value is resolved automatically at read time from published articles.
+enum HomepageSourceType {
+  MANUAL
+  LATEST
+  CATEGORY
+  TAG
+  LOCATION
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -71,11 +82,62 @@ enum UserStatus {
   SUSPENDED
 }
 
+/// Bangladesh keeps its exact original levels (COUNTRY/DIVISION/DISTRICT/UPAZILA). The rest support a
+/// global hierarchy without forcing every country into that same shape — a location's real parent chain
+/// (via parentId) is what matters; `type` is a label, not a fixed depth.
 enum LocationType {
+  CONTINENT
   COUNTRY
+  STATE
+  PROVINCE
+  REGION
   DIVISION
   DISTRICT
+  COUNTY
+  CITY
+  MUNICIPALITY
   UPAZILA
+  SUBDISTRICT
+  OTHER
+}
+
+/// bn is the platform default; en is the second supported language. Admin-managed via the Languages
+/// module — enable/disable and default are data (isActive/isDefault), never hardcoded in code.
+model Language {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  name       String
+  nativeName String   @map("native_name")
+  direction  String   @default("ltr")
+  isActive   Boolean  @default(true) @map("is_active")
+  isDefault  Boolean  @default(false) @map("is_default")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  articles             Article[]
+  categoryTranslations CategoryTranslation[]
+  tagTranslations      TagTranslation[]
+  locationTranslations LocationTranslation[]
+
+  @@map("languages")
+}
+
+/// One localized name per (location, language). The base Location.name/slug stay the canonical
+/// administrative identity; a translation only changes what is displayed.
+model LocationTranslation {
+  id         String   @id @default(uuid())
+  locationId String   @map("location_id")
+  languageId String   @map("language_id")
+  name       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, languageId])
+  @@map("location_translations")
 }
 
 enum CategoryStatus {
@@ -206,11 +268,16 @@ model Session {
 model Location {
   id          String         @id @default(uuid())
   name        String
-    slug        String
+  slug        String
   type        LocationType
   parentId    String?        @map("parent_id")
   identityKey String         @unique @map("identity_key")
   status      LocationStatus @default(ACTIVE)
+  /// ISO 3166-1 alpha-2, set on COUNTRY rows (and useful on CONTINENT/STATE rows for filtering).
+  countryCode String?        @map("country_code")
+  latitude    Float?
+  longitude   Float?
+  timezone    String?
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
@@ -219,11 +286,13 @@ model Location {
   articles          Article[]
   readerPreferences ReaderPreferenceLocation[]
   homepageSections  HomepageSection[]
+  translations      LocationTranslation[]
 
   @@unique([type, parentId, slug])
   @@index([slug])
   @@index([parentId])
   @@index([status])
+  @@index([countryCode])
   @@map("locations")
 }
 
@@ -243,10 +312,31 @@ model Category {
   articles          Article[]
   readerPreferences ReaderPreferenceCategory[]
   homepageSections  HomepageSection[]
+  translations      CategoryTranslation[]
 
   @@index([slug])
   @@index([status])
   @@map("categories")
+}
+
+/// Localized display name (and, for URL consistency, a per-language slug — defaults to the base slug
+/// so /category/:slug stays language-agnostic unless an editor deliberately gives a language its own URL).
+model CategoryTranslation {
+  id          String   @id @default(uuid())
+  categoryId  String   @map("category_id")
+  languageId  String   @map("language_id")
+  name        String
+  slug        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, languageId])
+  @@unique([languageId, slug])
+  @@map("category_translations")
 }
 
 model Tag {
@@ -257,49 +347,86 @@ model Tag {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  articleTags ArticleTag[]
+  articleTags      ArticleTag[]
+  homepageSections HomepageSection[]
+  translations     TagTranslation[]
 
   @@index([slug])
   @@map("tags")
 }
 
-model Article {
-  id                String        @id @default(uuid())
-  title             String
-  slug              String        @unique
-  excerpt           String?
-  content           Json?
-  seoTitle          String?       @map("seo_title")
-  seoDescription    String?       @map("seo_description")
-  seoKeywords       String?       @map("seo_keywords")
-  canonicalUrl      String?       @map("canonical_url")
-  noIndex           Boolean       @default(false) @map("no_index")
-  status            ArticleStatus @default(DRAFT)
-  authorId          String        @map("author_id")
-  categoryId        String?       @map("category_id")
-  featuredImageId   String?       @map("featured_image_id")
-  locationId        String?       @map("location_id")
-  publishedAt       DateTime?     @map("published_at")
-  reviewedAt        DateTime?     @map("reviewed_at")
-  reviewedById      String?       @map("reviewed_by_id")
-  archivedAt        DateTime?     @map("archived_at")
-  // Breaking news fields
-  isBreaking        Boolean?      @default(false) @map("is_breaking")
-  breakingStartedAt DateTime?     @map("breaking_started_at")
-  breakingEndsAt    DateTime?     @map("breaking_ends_at")
-  breakingPriority  Int?          @map("breaking_priority")
-  // Scheduling fields
-  scheduledAt       DateTime?     @map("scheduled_at")
-  // View tracking
-  viewCount         Int           @default(0) @map("view_count")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+/// One tag, many localized names/slugs — never two unrelated tags for the same concept.
+model TagTranslation {
+  id         String   @id @default(uuid())
+  tagId      String   @map("tag_id")
+  languageId String   @map("language_id")
+  name       String
+  slug       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  author             User                @relation("ArticleAuthor", fields: [authorId], references: [id])
-  category           Category?           @relation(fields: [categoryId], references: [id])
-  location           Location?           @relation(fields: [locationId], references: [id])
-  media              Media?              @relation("ArticleFeaturedImage", fields: [featuredImageId], references: [id])
-  reviewedBy         User?               @relation("ArticleReviewer", fields: [reviewedById], references: [id])
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, languageId])
+  @@unique([languageId, slug])
+  @@map("tag_translations")
+}
+
+/// Groups Article rows that are translations of one another. A source article gets one of these the
+/// moment its first translation is created; a standalone article (no group) has no known translations.
+model ArticleTranslationGroup {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  articles Article[]
+
+  @@map("article_translation_groups")
+}
+
+model Article {
+  id                 String        @id @default(uuid())
+  title              String
+  slug               String        @unique
+  excerpt            String?
+  content            Json?
+  seoTitle           String?       @map("seo_title")
+  seoDescription     String?       @map("seo_description")
+  seoKeywords        String?       @map("seo_keywords")
+  canonicalUrl       String?       @map("canonical_url")
+  noIndex            Boolean       @default(false) @map("no_index")
+  status             ArticleStatus @default(DRAFT)
+  authorId           String        @map("author_id")
+  categoryId         String?       @map("category_id")
+  featuredImageId    String?       @map("featured_image_id")
+  locationId         String?       @map("location_id")
+  /// Nullable only for rows that predate Phase 2C; every public read treats null as the default language.
+  languageId         String?       @map("language_id")
+  /// Set once this article has at least one translation; shared by every language version of the same story.
+  translationGroupId String?       @map("translation_group_id")
+  publishedAt        DateTime?     @map("published_at")
+  reviewedAt         DateTime?     @map("reviewed_at")
+  reviewedById       String?       @map("reviewed_by_id")
+  archivedAt         DateTime?     @map("archived_at")
+  // Breaking news fields
+  isBreaking         Boolean?      @default(false) @map("is_breaking")
+  breakingStartedAt  DateTime?     @map("breaking_started_at")
+  breakingEndsAt     DateTime?     @map("breaking_ends_at")
+  breakingPriority   Int?          @map("breaking_priority")
+  // Scheduling fields
+  scheduledAt        DateTime?     @map("scheduled_at")
+  // View tracking
+  viewCount          Int           @default(0) @map("view_count")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  author             User                     @relation("ArticleAuthor", fields: [authorId], references: [id])
+  category           Category?                @relation(fields: [categoryId], references: [id])
+  location           Location?                @relation(fields: [locationId], references: [id])
+  media              Media?                   @relation("ArticleFeaturedImage", fields: [featuredImageId], references: [id])
+  reviewedBy         User?                    @relation("ArticleReviewer", fields: [reviewedById], references: [id])
+  language           Language?                @relation(fields: [languageId], references: [id])
+  translationGroup   ArticleTranslationGroup? @relation(fields: [translationGroupId], references: [id])
   articleTags        ArticleTag[]
   views              ArticleView[]
   revisions          ArticleRevision[]
@@ -311,6 +438,7 @@ model Article {
   notifications      Notification[]
   homepagePlacements HomepagePlacement[]
 
+  @@unique([translationGroupId, languageId])
   @@index([slug])
   @@index([status])
   @@index([authorId])
@@ -324,6 +452,8 @@ model Article {
   @@index([scheduledAt])
   @@index([status, publishedAt])
   @@index([status, isBreaking])
+  @@index([languageId])
+  @@index([translationGroupId])
   @@map("articles")
 }
 
@@ -538,20 +668,26 @@ model HomepageSection {
   title           String
   enabled         Boolean             @default(true)
   sortOrder       Int                 @default(0) @map("sort_order")
+  sourceType      HomepageSourceType  @default(MANUAL) @map("source_type")
   categoryId      String?             @map("category_id")
   locationId      String?             @map("location_id")
+  tagId           String?             @map("tag_id")
   maxItems        Int                 @default(4) @map("max_items")
   layoutType      String              @default("FEATURED_STACK") @map("layout_type")
+  /// Presentation override: "AUTO" lets the layout choose the NewsCard variant.
+  cardVariant     String              @default("AUTO") @map("card_variant")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
   configuration HomepageConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade)
   category      Category?             @relation(fields: [categoryId], references: [id])
   location      Location?             @relation(fields: [locationId], references: [id])
+  tag           Tag?                  @relation(fields: [tagId], references: [id])
   placements    HomepagePlacement[]
 
+  @@unique([configurationId, key])
   @@index([enabled, sortOrder])
   @@index([configurationId, sortOrder])
-  @@unique([configurationId, key])
+  @@index([tagId])
   @@map("homepage_sections")
 }
 

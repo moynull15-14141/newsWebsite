@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ArticlesService } from './articles.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LanguagesService } from '../languages/languages.service';
 import {
   NotFoundException,
   ForbiddenException,
@@ -10,6 +11,7 @@ import {
 describe('ArticlesService', () => {
   let service: ArticlesService;
   let prisma: any;
+  let languagesService: any;
 
   const mockArticle = {
     id: 'article-1',
@@ -47,12 +49,16 @@ describe('ArticlesService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
       },
+      language: { findUnique: jest.fn() },
+      $transaction: jest.fn((fn: (tx: any) => unknown) => fn(prisma)),
     };
+    languagesService = { getDefault: jest.fn().mockResolvedValue({ id: 'lang-bn', code: 'bn', isDefault: true }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ArticlesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: LanguagesService, useValue: languagesService },
       ],
     }).compile();
 

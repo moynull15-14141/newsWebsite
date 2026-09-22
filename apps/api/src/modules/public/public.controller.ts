@@ -51,14 +51,14 @@ export class PublicController {
 
   @Public()
   @Get('homepage')
-  getHomepage() {
-    return this.publicService.getHomepageData();
+  getHomepage(@Query('lang') lang?: string) {
+    return this.publicService.getHomepageData(lang);
   }
 
   @Public()
   @Get('breaking-news')
-  getBreakingNews(@Query('limit') limit?: string) {
-    return this.publicService.getBreakingNews(limit ? parseInt(limit, 10) : 5);
+  getBreakingNews(@Query('limit') limit?: string, @Query('lang') lang?: string) {
+    return this.publicService.getBreakingNews(limit ? parseInt(limit, 10) : 5, lang);
   }
 
   @Public()
@@ -68,9 +68,10 @@ export class PublicController {
     const tagIds = (article as any).articleTags?.map((t: any) => t.tag.id) || [];
     return this.publicService.getRelatedArticles(
       article.id,
-      (article as any).categoryId,
+      (article as any).category?.id,
       tagIds,
-      (article as any).locationId,
+      (article as any).location?.id,
+      (article as any).language?.id ?? null,
     );
   }
 
@@ -88,10 +89,12 @@ export class PublicController {
   getMostRead(
     @Query('window') window?: 'today' | '24h' | '7d',
     @Query('limit') limit?: string,
+    @Query('lang') lang?: string,
   ) {
     return this.publicService.getMostRead({
       window: window || '24h',
       limit: limit ? parseInt(limit, 10) : 10,
+      lang,
     });
   }
 
@@ -100,10 +103,12 @@ export class PublicController {
   getTrending(
     @Query('location') location?: string,
     @Query('limit') limit?: string,
+    @Query('lang') lang?: string,
   ) {
     return this.publicService.getTrending({
       locationSlug: location,
       limit: limit ? parseInt(limit, 10) : 10,
+      lang,
     });
   }
 }

@@ -17,6 +17,13 @@ export interface FakeArticle {
   slug?: string;
   status: string;
   publishedAt?: Date | null;
+  categoryId?: string | null;
+  locationId?: string | null;
+  /** Tags the article carries, used by TAG-sourced section resolution. */
+  tagIds?: string[];
+  languageId?: string | null;
+  translationGroupId?: string | null;
+  language?: { id: string; code: string } | null;
   [key: string]: unknown;
 }
 
@@ -27,10 +34,21 @@ interface State {
   articles: FakeArticle[];
   categories: any[];
   locations: any[];
+  tags: any[];
+}
+
+/**
+ * Minimal LanguagesService double: PublicService only ever calls resolveRequested/getDefault. Plain
+ * async functions (not jest.fn()) so this plain helper file — not itself a *.spec.ts — never depends on
+ * jest's ambient types being resolvable outside the test runner.
+ */
+export function fakeLanguagesService(code = 'bn') {
+  const language = { id: `lang-${code}`, code, isDefault: true };
+  return { resolveRequested: async () => language, getDefault: async () => language };
 }
 
 export class FakeHomepagePrisma {
-  state: State = { configurations: [], sections: [], placements: [], articles: [], categories: [], locations: [] };
+  state: State = { configurations: [], sections: [], placements: [], articles: [], categories: [], locations: [], tags: [] };
   ignoreNestedWhere = false;
   transactionsStarted = 0;
   isolationLevels: Array<string | undefined> = [];
@@ -76,10 +94,13 @@ export class FakeHomepagePrisma {
       title: rest.key,
       enabled: true,
       sortOrder: this.state.sections.filter((s) => s.configurationId === configurationId).length,
+      sourceType: 'MANUAL',
       categoryId: null,
       locationId: null,
+      tagId: null,
       maxItems: 4,
       layoutType: 'FEATURED_STACK',
+      cardVariant: 'AUTO',
       updatedAt: new Date(),
       ...rest,
     };
@@ -107,6 +128,11 @@ export class FakeHomepagePrisma {
         sortOrder: s.sortOrder,
         maxItems: s.maxItems,
         layoutType: s.layoutType,
+        cardVariant: s.cardVariant,
+        sourceType: s.sourceType,
+        categoryId: s.categoryId,
+        locationId: s.locationId,
+        tagId: s.tagId,
         articleIds: this.state.placements
           .filter((p) => p.sectionId === s.id)
           .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -174,10 +200,13 @@ export class FakeHomepagePrisma {
         id: this.nextId('sec'),
         enabled: true,
         sortOrder: 0,
+        sourceType: 'MANUAL',
         categoryId: null,
         locationId: null,
+        tagId: null,
         maxItems: 4,
         layoutType: 'FEATURED_STACK',
+        cardVariant: 'AUTO',
         updatedAt: new Date(),
         ...scalars,
       };
@@ -189,10 +218,11 @@ export class FakeHomepagePrisma {
       this.hit('homepageSection.update');
       const row = this.state.sections.find((s) => s.id === where.id);
       if (!row) throw new Error('section not found');
-      const { category, location, ...scalars } = data;
+      const { category, location, tag, ...scalars } = data;
       Object.assign(row, scalars, { updatedAt: new Date() });
       if (category) row.categoryId = category.connect ? category.connect.id : null;
       if (location) row.locationId = location.connect ? location.connect.id : null;
+      if (tag) row.tagId = tag.connect ? tag.connect.id : null;
       return { ...row };
     },
     delete: async ({ where }: any) => {
@@ -215,11 +245,73 @@ export class FakeHomepagePrisma {
     },
   };
 
+  /**
+   * Supports the subset of article queries the homepage uses: placement hydration (`id.in`) and the
+   * automatic source filters produced by `resolveSectionArticles` (status + publishedAt eligibility,
+   * category, tag, location family), plus ordering by publishedAt and `take`.
+   */
   article = {
-    findMany: async ({ where }: any) => this.state.articles.filter((a) => (where?.id?.in ? where.id.in.includes(a.id) : true)).map((a) => ({ ...a })),
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      let rows = this.state.articles.filter((a) => this.articleMatches(a, where));
+      const orders: any[] = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+      if (orders.length) {
+        rows = [...rows].sort((a, b) => {
+          for (const order of orders) {
+            const [field, raw] = Object.entries<any>(order)[0];
+            const direction = raw && typeof raw === 'object' ? raw.sort : raw;
+            const left = a[field] ? new Date(a[field] as any).getTime() : 0;
+            const right = b[field] ? new Date(b[field] as any).getTime() : 0;
+            const cmp = left < right ? -1 : left > right ? 1 : 0;
+            if (cmp) return direction === 'desc' ? -cmp : cmp;
+          }
+          return 0;
+        });
+      }
+      return (take ? rows.slice(0, take) : rows).map((a) => ({ ...a }));
+    },
   };
   category = { findUnique: async ({ where }: any) => this.state.categories.find((c) => c.id === where.id) ?? null };
-  location = { findUnique: async ({ where }: any) => this.state.locations.find((l) => l.id === where.id) ?? null };
+  location = {
+    findUnique: async ({ where }: any) => this.state.locations.find((l) => l.id === where.id) ?? null,
+    findMany: async ({ where }: any = {}) =>
+      this.state.locations
+        .filter((l) => (where?.parentId?.in ? where.parentId.in.includes(l.parentId) : true))
+        .map((l) => ({ ...l })),
+  };
+  tag = { findUnique: async ({ where }: any) => this.state.tags.find((t) => t.id === where.id) ?? null };
+
+  /**
+   * Recursive so it can evaluate `where.AND` (a list of sub-clauses, each ANDed in) the same way real
+   * Prisma does — needed because the language filter is deliberately nested inside its own `AND` entry
+   * in production code (see homepage.section-resolver.ts / public.service.ts), to avoid a plain object
+   * spread silently overwriting an existing top-level `OR` (e.g. the publishedAt eligibility clause).
+   */
+  private articleMatches(article: FakeArticle, where: any): boolean {
+    if (!where) return true;
+    if (where.id?.in && !where.id.in.includes(article.id)) return false;
+    if (where.status && article.status !== where.status) return false;
+    if (where.categoryId && article.categoryId !== where.categoryId) return false;
+    if (where.locationId?.in && !where.locationId.in.includes(article.locationId as any)) return false;
+    if (where.languageId !== undefined && (article.languageId ?? null) !== where.languageId) return false;
+    if (where.articleTags?.some?.tagId && !(article.tagIds ?? []).includes(where.articleTags.some.tagId)) return false;
+    if (Array.isArray(where.AND) && !where.AND.every((clause: any) => this.articleMatches(article, clause))) return false;
+    if (Array.isArray(where.OR) && !where.OR.some((clause: any) => this.matchesOrClause(article, clause))) return false;
+    return true;
+  }
+
+  /** One arm of a top-level `OR` array: either publicArticleWhere()'s publishedAt pair or articleLanguageWhere()'s languageId pair. */
+  private matchesOrClause(article: FakeArticle, clause: any): boolean {
+    if ('publishedAt' in clause) {
+      const published = article.publishedAt ? new Date(article.publishedAt).getTime() : null;
+      if (clause.publishedAt === null) return published === null;
+      if (clause.publishedAt?.lte) return published !== null && published <= new Date(clause.publishedAt.lte).getTime();
+      return false;
+    }
+    if ('languageId' in clause) {
+      return (article.languageId ?? null) === clause.languageId;
+    }
+    return false;
+  }
 
   // ------------------------------------------------------------------ internals
   private matches(row: any, where: any) {
@@ -264,6 +356,8 @@ export class FakeHomepagePrisma {
     }
     const result: any = { ...section };
     if (include?.category) result.category = this.state.categories.find((c) => c.id === section.categoryId) ?? null;
+    if (include?.tag) result.tag = this.state.tags.find((t) => t.id === section.tagId) ?? null;
+    if (include?.location) result.location = this.state.locations.find((l) => l.id === section.locationId) ?? null;
     if (include?.placements) {
       const { where, orderBy, take } = include.placements;
       let rows = this.state.placements.filter((p) => p.sectionId === section.id).sort((a, b) => a.sortOrder - b.sortOrder);

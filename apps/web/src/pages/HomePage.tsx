@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, withLang } from '@/lib/api';
 import AdSlot from '@/components/AdSlot';
 import NewsletterSignup from '@/components/NewsletterSignup';
 import { Skeleton } from '@/components/Skeleton';
 import { Container } from '@/components/Container';
 import { BriefList, EditorialSection, LeadStory, RankedList, SectionBody, StoryRow } from '@/components/editorial';
 import { selectHomepageSections, selectHomepageStories, uniqueArticles, type HomepageEditorialData } from '@/lib/editorial-selection';
+import { useLanguage } from '@/lib/i18n';
 
 function HomeSkeleton() {
   return <Container className="py-8"><div className="grid gap-7 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] lg:grid-cols-[14rem_minmax(0,2fr)_17rem]">
@@ -16,20 +17,24 @@ function HomeSkeleton() {
 }
 
 export default function HomePage() {
-  const { data, isLoading, error } = useQuery<HomepageEditorialData>({ queryKey: ['homepage'], queryFn: () => apiFetch('/public/homepage') });
+  const { code, t, pathFor } = useLanguage();
+  const { data, isLoading, error } = useQuery<HomepageEditorialData>({
+    queryKey: ['homepage', code],
+    queryFn: () => apiFetch(withLang('/public/homepage', code)),
+  });
   if (isLoading) return <HomeSkeleton />;
-  if (error) return <Container className="py-16 text-center"><h1 className="text-xl font-bold">Something went wrong</h1><p className="mt-2 text-neutral-600">Unable to load the homepage. Please try again later.</p></Container>;
+  if (error) return <Container className="py-16 text-center"><h1 className="text-xl font-bold">{t('common.somethingWrong')}</h1><p className="mt-2 text-neutral-600">{t('common.unableToLoad')}</p></Container>;
 
   const { hero, briefs, secondary, ranked } = selectHomepageStories(data);
   const sections = selectHomepageSections(data);
   const sectionUsed = new Set(hero ? [hero.id] : []);
 
   return <Container className="py-6 lg:py-8">
-    {hero ? <section aria-label="Top stories" className="grid gap-7 border-b border-neutral-300 pb-8 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] lg:grid-cols-[14rem_minmax(0,2fr)_17rem] lg:gap-8">
-      <div className="order-2 lg:order-1"><BriefList title="Latest" articles={briefs} /></div>
+    {hero ? <section aria-label={t('common.topStories')} className="grid gap-7 border-b border-neutral-300 pb-8 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] lg:grid-cols-[14rem_minmax(0,2fr)_17rem] lg:gap-8">
+      <div className="order-2 lg:order-1"><BriefList title={t('common.latest')} articles={briefs} /></div>
       <div className="order-1 lg:order-2"><LeadStory article={hero} /></div>
-      <div className="order-3 border-t border-neutral-300 pt-5 md:border-l md:border-t-0 md:pl-7 md:pt-0 lg:pl-8"><h2 className="mb-1 border-t-4 border-neutral-900 py-3 text-lg font-bold">Top stories</h2>{secondary.slice(0, 3).map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
-    </section> : <p className="py-16 text-center text-neutral-500">No published stories are available.</p>}
+      <div className="order-3 border-t border-neutral-300 pt-5 md:border-l md:border-t-0 md:pl-7 md:pt-0 lg:pl-8"><h2 className="mb-1 border-t-4 border-neutral-900 py-3 text-lg font-bold">{t('common.topStories')}</h2>{secondary.slice(0, 3).map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
+    </section> : <p className="py-16 text-center text-neutral-500">{t('home.noStories')}</p>}
 
     <AdSlot slot="HOME_HERO_BELOW" pageType="homepage" />
 
@@ -38,11 +43,11 @@ export default function HomePage() {
         const articles = uniqueArticles(section.articles, sectionUsed).slice(0, 6);
         if (!articles.length) return null;
         articles.forEach((article) => sectionUsed.add(article.id));
-        return <EditorialSection key={section.key} title={section.title} href={section.href}>
-          <SectionBody articles={articles} layout={section.layout} />
+        return <EditorialSection key={section.key} title={section.title} href={section.href ? pathFor(section.href, code) : undefined}>
+          <SectionBody articles={articles} layout={section.layout} cardVariant={section.cardVariant} />
         </EditorialSection>;
       })}</div>
-      <div className="space-y-10 lg:border-l lg:border-neutral-300 lg:pl-8"><RankedList title="Most read" articles={ranked.length ? ranked : uniqueArticles(data?.mostRead || [], new Set(hero ? [hero.id] : [])).slice(0, 5)} />{data?.trending && <BriefList title="Trending" articles={uniqueArticles(data.trending, new Set(hero ? [hero.id] : [])).slice(0, 5)} />}</div>
+      <div className="space-y-10 lg:border-l lg:border-neutral-300 lg:pl-8"><RankedList title={t('common.mostRead')} articles={ranked.length ? ranked : uniqueArticles(data?.mostRead || [], new Set(hero ? [hero.id] : [])).slice(0, 5)} />{data?.trending && <BriefList title={t('common.trending')} articles={uniqueArticles(data.trending, new Set(hero ? [hero.id] : [])).slice(0, 5)} />}</div>
     </div>
     <div className="mt-12"><NewsletterSignup /></div>
   </Container>;

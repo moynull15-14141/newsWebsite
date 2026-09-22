@@ -5,6 +5,7 @@ import { ArticlesService } from './articles.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { QueryArticlesDto } from './dto/query-articles.dto';
+import { CreateTranslationDto } from './dto/create-translation.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -150,5 +151,19 @@ export class ArticlesController {
   @RequirePermissions('article.edit')
   cancelSchedule(@Param('id') id: string, @CurrentUser('userId') userId: string, @Req() req: any) {
     return this.articlesService.cancelSchedule(id, userId, req.user?.permissions || []);
+  }
+
+  @Post(':id/translations')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.create')
+  createTranslation(@Param('id') id: string, @Body() dto: CreateTranslationDto, @CurrentUser('userId') userId: string) {
+    return this.articlesService.createTranslation(id, dto.languageId, userId);
+  }
+
+  @Get(':id/translations')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
+  getTranslations(@Param('id') id: string) {
+    return this.articlesService.getTranslations(id);
   }
 }

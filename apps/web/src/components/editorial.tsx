@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Play, ArrowRight } from 'lucide-react';
 import { ImagePlaceholder } from './ImagePlaceholder';
+import ArticleCard, { type ArticleCardVariant } from './ArticleCard';
 import { contentLanguage } from '@/lib/content-language';
 
 export interface EditorialArticle {
@@ -148,21 +149,123 @@ export function MediaStory({ article }: { article: EditorialArticle }) {
  * Validated homepage layout presets (mirrors HOMEPAGE_LAYOUT_PRESETS in the API). Every preset listed
  * here is rendered by SectionBody below — do not add one on the API before implementing it here.
  */
-export type HomepageLayoutPreset = 'FEATURED_STACK' | 'THREE_UP' | 'COMPACT_LIST';
+export type HomepageLayoutPreset =
+  | 'FEATURED_STACK'
+  | 'TWO_UP'
+  | 'THREE_UP'
+  | 'FOUR_UP'
+  | 'GRID'
+  | 'COMPACT_LIST'
+  | 'HORIZONTAL_LIST'
+  | 'IMAGE_LED'
+  | 'TEXT_LED';
 
-/** Body of a homepage section for a layout preset. A single remaining story always renders as one row. */
-export function SectionBody({ articles, layout }: { articles: EditorialArticle[]; layout: HomepageLayoutPreset }) {
+/** Presentation override from the admin. 'AUTO' lets the layout choose its own NewsCard variant. */
+export type HomepageCardVariant = 'AUTO' | ArticleCardVariant;
+
+/**
+ * Column tracks per layout. Every one starts single-column and only adds tracks at a breakpoint, so a
+ * multi-column desktop section becomes a readable vertical stack on mobile rather than a squeezed grid.
+ */
+const COLUMN_CLASS: Partial<Record<HomepageLayoutPreset, string>> = {
+  TWO_UP: 'grid gap-6 sm:grid-cols-2',
+  THREE_UP: 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3',
+  FOUR_UP: 'grid gap-6 sm:grid-cols-2 lg:grid-cols-4',
+  GRID: 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3',
+};
+
+/** How many stories a fixed-column layout can show; other layouts show everything they are given. */
+const COLUMN_CAP: Partial<Record<HomepageLayoutPreset, number>> = { TWO_UP: 2, THREE_UP: 3, FOUR_UP: 4 };
+
+/**
+ * Body of a homepage section.
+ *
+ * `layout` picks the composition; `cardVariant` optionally forces which NewsCard variant renders each
+ * story, in which case the layout only supplies the container. A single remaining story always renders
+ * as one row so a section never looks broken when its other stories became ineligible.
+ */
+export function SectionBody({
+  articles,
+  layout,
+  cardVariant = 'AUTO',
+}: {
+  articles: EditorialArticle[];
+  layout: HomepageLayoutPreset;
+  cardVariant?: HomepageCardVariant;
+}) {
   const [lead, ...rest] = articles;
   if (!lead) return null;
+
+  // Explicit card presentation chosen in the admin: reuse the existing NewsCard variants as-is.
+  if (cardVariant !== 'AUTO') {
+    const cap = COLUMN_CAP[layout];
+    const shown = cap ? articles.slice(0, cap) : articles;
+    const columns = COLUMN_CLASS[layout];
+    return (
+      <div className={columns ?? 'grid gap-6'}>
+        {shown.map((article) => <ArticleCard key={article.id} article={article} variant={cardVariant} />)}
+      </div>
+    );
+  }
+
   if (articles.length === 1) return <StoryRow article={lead} />;
-  if (layout === 'COMPACT_LIST') return <div>{articles.map((article) => <StoryRow key={article.id} article={article} compact />)}</div>;
-  if (layout === 'THREE_UP') return <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">{articles.slice(0, 3).map((article) => <StandardStory key={article.id} article={article} />)}</div>;
-  return (
-    <div className="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(15rem,2fr)] md:divide-x md:divide-neutral-200">
-      <StandardStory article={lead} />
-      <div className="md:pl-6">{rest.slice(0, 3).map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
-    </div>
-  );
+
+  switch (layout) {
+    case 'COMPACT_LIST':
+      return <div>{articles.map((article) => <StoryRow key={article.id} article={article} compact />)}</div>;
+
+    case 'HORIZONTAL_LIST':
+      return (
+        <div className="grid gap-5 divide-y divide-neutral-200 [&>*:not(:first-child)]:pt-5">
+          {articles.map((article) => <ArticleCard key={article.id} article={article} variant="horizontal" />)}
+        </div>
+      );
+
+    case 'TEXT_LED':
+      // Headline-led section: no imagery competes with the type.
+      return (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {articles.map((article) => <StandardStory key={article.id} article={article} media={false} />)}
+        </div>
+      );
+
+    case 'IMAGE_LED':
+      return (
+        <div className="grid gap-7">
+          <LeadStory article={lead} />
+          {rest.length > 0 && (
+            <div className={COLUMN_CLASS.GRID}>
+              {rest.map((article) => <ArticleCard key={article.id} article={article} variant="image-top" />)}
+            </div>
+          )}
+        </div>
+      );
+
+    case 'GRID':
+      return (
+        <div className={COLUMN_CLASS.GRID}>
+          {articles.map((article) => <ArticleCard key={article.id} article={article} variant="image-top" />)}
+        </div>
+      );
+
+    case 'TWO_UP':
+    case 'THREE_UP':
+    case 'FOUR_UP':
+      return (
+        <div className={COLUMN_CLASS[layout]}>
+          {articles.slice(0, COLUMN_CAP[layout]).map((article) => <StandardStory key={article.id} article={article} />)}
+        </div>
+      );
+
+    case 'FEATURED_STACK':
+    default:
+      return (
+        <div className="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(15rem,2fr)] md:divide-x md:divide-neutral-200">
+          <StandardStory article={lead} />
+          <div className="md:pl-6">{rest.slice(0, 3).map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
+        </div>
+      );
+  }
 }
 
 export function EditorialSection({ title, href, children }: { title: string; href?: string; children: React.ReactNode }) {

@@ -63,12 +63,52 @@ export interface MaxItemsBounds {
   fixed: boolean;
 }
 
-export function maxItemsBounds(section: Pick<DraftSection, 'type' | 'placements'>): MaxItemsBounds {
+export function maxItemsBounds(section: Pick<DraftSection, 'type' | 'placements'> & { sourceType?: string }): MaxItemsBounds {
   if (section.type === HERO_TYPE) return { min: 1, max: 1, fixed: true };
-  return { min: Math.max(1, section.placements.length), max: MAX_SECTION_ITEMS, fixed: false };
+  // Only hand-picked sections are pinned by what is already placed; an automatic source has no
+  // placements, so its limit can move freely.
+  const floor = isManualSource(section.sourceType ?? 'MANUAL') ? Math.max(1, section.placements.length) : 1;
+  return { min: floor, max: MAX_SECTION_ITEMS, fixed: false };
 }
 
 export const supportsCategoryLink = (type: string) => type === 'CUSTOM';
+
+// ------------------------------------------------------------- content sources
+
+/** True when the editor picks the stories by hand rather than the API resolving a query. */
+export const isManualSource = (sourceType: string) => sourceType === 'MANUAL';
+
+export const isManualSection = (section: Pick<DraftSection, 'sourceType'>) => isManualSource(section.sourceType);
+
+/** Which link an automatic source needs; null when it needs none. Mirrors REQUIRED_SOURCE_LINK in the API. */
+export function requiredSourceLink(sourceType: string): 'categoryId' | 'tagId' | 'locationId' | null {
+  switch (sourceType) {
+    case 'CATEGORY':
+      return 'categoryId';
+    case 'TAG':
+      return 'tagId';
+    case 'LOCATION':
+      return 'locationId';
+    default:
+      return null;
+  }
+}
+
+/** Short description of where a section's stories come from, for the section header. */
+export function describeSource(section: Pick<DraftSection, 'sourceType' | 'category' | 'tag' | 'location'>): string {
+  switch (section.sourceType) {
+    case 'LATEST':
+      return 'Latest published';
+    case 'CATEGORY':
+      return section.category ? `Category: ${section.category.name}` : 'Category: not set';
+    case 'TAG':
+      return section.tag ? `Tag: ${section.tag.name}` : 'Tag: not set';
+    case 'LOCATION':
+      return section.location ? `Location: ${section.location.name}` : 'Location: not set';
+    default:
+      return 'Hand-picked';
+  }
+}
 
 // ---------------------------------------------------------------- publishing
 

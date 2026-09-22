@@ -179,7 +179,7 @@ describe('HomepageController (authentication, permission, validation)', () => {
       ['create without expectedVersion', 'POST', '/homepage/draft/sections', { type: 'CUSTOM', title: 'x' }],
       ['create with an unknown section type', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'NOPE', title: 'x' }],
       ['create with a blank title', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'CUSTOM', title: '   ' }],
-      ['create with an unknown layout preset', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'CUSTOM', title: 'x', layoutType: 'GRID' }],
+      ['create with an unknown layout preset', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'CUSTOM', title: 'x', layoutType: 'MOSAIC_XL' }],
       ['create with maxItems above the cap', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'CUSTOM', title: 'x', maxItems: 500 }],
       ['create with an unexpected property', 'POST', '/homepage/draft/sections', { expectedVersion: 1, type: 'CUSTOM', title: 'x', published: true }],
       ['update trying to change the type', 'PATCH', `/homepage/draft/sections/${SECTION_ID}`, { expectedVersion: 1, type: 'HERO' }],

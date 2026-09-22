@@ -7,13 +7,20 @@ import RichTextEditor from '../components/RichTextEditor';
 import LocationSelector from '../components/LocationSelector';
 import CategorySelector from '../components/CategorySelector';
 import TagSelector from '../components/TagSelector';
-import { Save, Send, Check, Globe, ArrowLeft, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon } from 'lucide-react';
+import { Save, Send, Check, Globe, ArrowLeft, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus } from 'lucide-react';
 
 interface MediaItem {
   id: string;
   publicUrl: string;
   originalFilename: string;
   altText: string | null;
+}
+
+interface ArticleLanguage {
+  id: string;
+  code: string;
+  name: string;
+  nativeName: string;
 }
 
 interface ArticleData {
@@ -39,7 +46,25 @@ interface ArticleData {
   breakingEndsAt: string | null;
   scheduledAt: string | null;
   articleTags: { tag: { id: string; name: string } }[];
+  language?: ArticleLanguage | null;
 }
+
+interface TranslationRow {
+  id: string;
+  title: string;
+  slug: string;
+  status: string;
+  publishedAt: string | null;
+  language: ArticleLanguage;
+}
+
+const translationStatusColors: Record<string, string> = {
+  DRAFT: 'bg-gray-100 text-gray-700',
+  IN_REVIEW: 'bg-yellow-100 text-yellow-700',
+  APPROVED: 'bg-blue-100 text-blue-700',
+  PUBLISHED: 'bg-green-100 text-green-700',
+  ARCHIVED: 'bg-red-100 text-red-700',
+};
 
 export default function ArticleEditorPage() {
   const { id } = useParams();
@@ -155,6 +180,23 @@ export default function ArticleEditorPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['revisions', id] });
     },
+  });
+
+  const { data: translations } = useQuery<TranslationRow[]>({
+    queryKey: ['article-translations', id],
+    queryFn: () => apiFetch(`/articles/${id}/translations`),
+    enabled: !!id,
+  });
+
+  const { data: activeLanguages } = useQuery<ArticleLanguage[]>({
+    queryKey: ['languages'],
+    queryFn: () => apiFetch('/languages'),
+    enabled: !!id && hasPermission('article.create'),
+  });
+
+  const createTranslationMutation = useMutation({
+    mutationFn: (languageId: string) => apiFetch<{ id: string }>(`/articles/${id}/translations`, { method: 'POST', body: JSON.stringify({ languageId }) }),
+    onSuccess: (created) => navigate(`/articles/${created.id}/edit`),
   });
 
   const { data: mediaData, isLoading: mediaLoading } = useQuery({
@@ -471,6 +513,59 @@ export default function ArticleEditorPage() {
                     </button>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {id && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex items-center gap-2">
+                <LanguagesIcon className="h-4 w-4 text-teal-500" />
+                <h3 className="text-sm font-medium text-gray-900">Translations</h3>
+              </div>
+              <div className="mt-4 space-y-2">
+                {(() => {
+                  const present = translations?.length
+                    ? translations
+                    : article?.language
+                      ? [{ id: article.id, title: article.title, slug: article.slug, status: article.status, publishedAt: null, language: article.language }]
+                      : [];
+                  const presentLanguageIds = new Set(present.map((t) => t.language.id));
+                  const missing = (activeLanguages ?? []).filter((lang) => !presentLanguageIds.has(lang.id));
+
+                  return (
+                    <>
+                      {present.map((t) => (
+                        <div key={t.id} className="flex items-center justify-between gap-2 rounded border border-gray-100 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-gray-500">{t.language.nativeName}</p>
+                            {t.id === id ? (
+                              <p className="truncate text-sm text-gray-400">This article</p>
+                            ) : (
+                              <a href={`/articles/${t.id}/edit`} className="truncate text-sm text-primary-600 hover:text-primary-700">{t.title}</a>
+                            )}
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${translationStatusColors[t.status] || ''}`}>{t.status.replace('_', ' ')}</span>
+                        </div>
+                      ))}
+                      {hasPermission('article.create') && missing.map((lang) => (
+                        <button
+                          key={lang.id}
+                          onClick={() => createTranslationMutation.mutate(lang.id)}
+                          disabled={createTranslationMutation.isPending}
+                          className="flex w-full items-center justify-between gap-2 rounded border border-dashed border-gray-300 px-3 py-2 text-left text-sm text-gray-600 hover:border-primary-400 hover:text-primary-600 disabled:opacity-50"
+                        >
+                          <span>Create {lang.nativeName} translation</span>
+                          <Plus className="h-3.5 w-3.5 shrink-0" />
+                        </button>
+                      ))}
+                      {createTranslationMutation.isError && (
+                        <p className="text-xs text-red-600">{(createTranslationMutation.error as Error).message}</p>
+                      )}
+                      {!present.length && !missing.length && <p className="text-xs text-gray-400">No languages configured.</p>}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}

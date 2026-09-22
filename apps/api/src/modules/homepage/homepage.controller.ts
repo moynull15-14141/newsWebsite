@@ -35,10 +35,11 @@ export class HomepageController {
     return this.service.getDraft();
   }
 
+  /** `?lang=` lets an editor preview the draft in a specific language; defaults to the platform default. */
   @Get('draft/preview')
   @Header('Cache-Control', 'no-store')
-  preview() {
-    return this.service.previewDraft();
+  preview(@Query('lang') lang?: string) {
+    return this.service.previewDraft(lang);
   }
 
   @Post('draft/sections')

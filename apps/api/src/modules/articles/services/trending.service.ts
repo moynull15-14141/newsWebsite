@@ -1,17 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { articleLanguageWhere, LanguageFilter } from '../../../common/i18n/article-language';
 
 @Injectable()
 export class TrendingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getTrending(options: { limit?: number; locationSlug?: string } = {}) {
-    const { limit = 10, locationSlug } = options;
+  async getTrending(options: { limit?: number; locationSlug?: string; language?: LanguageFilter } = {}) {
+    const { limit = 10, locationSlug, language } = options;
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const where: any = {
       status: 'PUBLISHED',
       publishedAt: { gte: sevenDaysAgo },
+      ...(language ? articleLanguageWhere(language) : {}),
     };
 
     if (locationSlug) {

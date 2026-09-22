@@ -5,7 +5,10 @@ import { ArticleViewService } from '../articles/services/article-view.service';
 import { TrendingService } from '../articles/services/trending.service';
 import { MostReadService } from '../articles/services/most-read.service';
 import { BreakingNewsService } from '../articles/services/breaking-news.service';
+import { LanguagesService } from '../languages/languages.service';
 import { NotFoundException } from '@nestjs/common';
+
+const DEFAULT_LANGUAGE = { id: 'lang-bn', code: 'bn', isDefault: true };
 
 describe('PublicService', () => {
   let service: PublicService;
@@ -14,6 +17,7 @@ describe('PublicService', () => {
   let trendingService: any;
   let mostReadService: any;
   let breakingNewsService: any;
+  let languagesService: any;
 
   const mockArticle = {
     id: '1',
@@ -50,6 +54,10 @@ describe('PublicService', () => {
     trendingService = { getTrending: jest.fn() };
     mostReadService = { getMostRead: jest.fn() };
     breakingNewsService = { getActiveBreakingNews: jest.fn() };
+    languagesService = {
+      resolveRequested: jest.fn().mockResolvedValue(DEFAULT_LANGUAGE),
+      getDefault: jest.fn().mockResolvedValue(DEFAULT_LANGUAGE),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -59,6 +67,7 @@ describe('PublicService', () => {
         { provide: TrendingService, useValue: trendingService },
         { provide: MostReadService, useValue: mostReadService },
         { provide: BreakingNewsService, useValue: breakingNewsService },
+        { provide: LanguagesService, useValue: languagesService },
       ],
     }).compile();
 
@@ -87,7 +96,8 @@ describe('PublicService', () => {
       prisma.article.findUnique.mockResolvedValue(mockArticle);
 
       const result = await service.getArticleBySlug('test-article');
-      expect(result).toEqual(mockArticle);
+      // No translationGroupId on the fixture -> no sibling lookup, translations always [].
+      expect(result).toEqual({ ...mockArticle, translations: [] });
     });
 
     it('throws NotFoundException for non-existent', async () => {

@@ -76,4 +76,9 @@ export class UpdateArticleDto {
   @IsDateString()
   @IsOptional()
   scheduledAt?: string;
+
+  /** Reassigning language is rare (fixing a mistaken creation) but not blocked. */
+  @IsString()
+  @IsOptional()
+  languageId?: string;
 }

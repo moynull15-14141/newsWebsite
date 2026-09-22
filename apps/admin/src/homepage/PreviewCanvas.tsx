@@ -98,12 +98,57 @@ function Card({ article }: { article: PreviewArticle }) {
   );
 }
 
-/** The three supported layout presets (mirrors SectionBody in the public web). */
+/**
+ * Columns and caps per preset, mirroring COLUMN_CLASS / COLUMN_CAP in the public SectionBody.
+ * The class strings are written out in full so Tailwind can see them.
+ */
+const PREVIEW_COLUMNS: Record<string, { cols: string; cap?: number }> = {
+  TWO_UP: { cols: 'grid-cols-2', cap: 2 },
+  THREE_UP: { cols: 'grid-cols-3', cap: 3 },
+  FOUR_UP: { cols: 'grid-cols-4', cap: 4 },
+  GRID: { cols: 'grid-cols-3' },
+};
+
+/** Every supported layout preset (mirrors SectionBody in the public web). */
 function Body({ articles, layout, desktop }: { articles: PreviewArticle[]; layout: string; desktop: boolean }) {
   const [lead, ...rest] = articles;
   if (articles.length === 1) return <Row article={lead} />;
+
   if (layout === 'COMPACT_LIST') return <div>{articles.map((article) => <Row key={article.id} article={article} compact />)}</div>;
-  if (layout === 'THREE_UP') return <div className={`grid gap-5 ${desktop ? 'grid-cols-3' : 'grid-cols-1'}`}>{articles.slice(0, 3).map((article) => <Card key={article.id} article={article} />)}</div>;
+  if (layout === 'HORIZONTAL_LIST') return <div className="divide-y divide-neutral-200">{articles.map((article) => <Row key={article.id} article={article} />)}</div>;
+
+  if (layout === 'TEXT_LED') {
+    return (
+      <div className={`grid gap-5 ${desktop ? 'grid-cols-3' : 'grid-cols-1'}`}>
+        {articles.map((article) => <Row key={article.id} article={article} compact />)}
+      </div>
+    );
+  }
+
+  if (layout === 'IMAGE_LED') {
+    return (
+      <div className="grid gap-5">
+        <Card article={lead} />
+        {rest.length > 0 && (
+          <div className={`grid gap-5 ${desktop ? 'grid-cols-3' : 'grid-cols-1'}`}>
+            {rest.map((article) => <Card key={article.id} article={article} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const columns = PREVIEW_COLUMNS[layout];
+  if (columns) {
+    const shown = columns.cap ? articles.slice(0, columns.cap) : articles;
+    return (
+      <div className={`grid gap-5 ${desktop ? columns.cols : 'grid-cols-1'}`}>
+        {shown.map((article) => <Card key={article.id} article={article} />)}
+      </div>
+    );
+  }
+
+  // FEATURED_STACK, and any unknown stored value (which the API normalizes to it too).
   return (
     <div className={`grid gap-5 ${desktop ? 'grid-cols-[3fr_2fr] divide-x divide-neutral-200' : 'grid-cols-1'}`}>
       <Card article={lead} />

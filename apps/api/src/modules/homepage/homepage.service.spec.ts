@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { PublicService } from '../public/public.service';
 import { HomepageService } from './homepage.service';
-import { FakeHomepagePrisma } from './homepage-prisma.testkit';
+import { FakeHomepagePrisma, fakeLanguagesService } from './homepage-prisma.testkit';
 
 const PAST = new Date('2026-01-01T00:00:00Z');
 const FUTURE = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -30,8 +30,8 @@ function setup(options: { liveSections?: boolean; draftConfig?: boolean } = {}) 
   const trending = { getTrending: jest.fn().mockResolvedValue([{ id: 'trend-1' }]) };
   const mostRead = { getMostRead: jest.fn().mockResolvedValue([{ id: 'read-1' }]) };
   const breaking = { getActiveBreakingNews: jest.fn().mockResolvedValue([]) };
-  const publicService = new PublicService(db as any, {} as any, trending as any, mostRead as any, breaking as any);
-  const service = new HomepageService(db as any, publicService);
+  const publicService = new PublicService(db as any, {} as any, trending as any, mostRead as any, breaking as any, fakeLanguagesService() as any);
+  const service = new HomepageService(db as any, publicService, fakeLanguagesService() as any);
 
   const draftSection = (key: string) => db.state.sections.find((s) => s.configurationId === 'cfg-draft' && s.key === key)!;
   const draftVersion = () => db.configuration('DRAFT')!.version as number;
@@ -84,14 +84,16 @@ describe('HomepageService', () => {
       const { service } = setup();
       const draft = await service.getDraft();
       expect(draft.version).toBe(1);
-      expect(draft.layoutPresets).toEqual(['FEATURED_STACK', 'THREE_UP', 'COMPACT_LIST']);
+      expect(draft.layoutPresets).toEqual([
+        'FEATURED_STACK', 'TWO_UP', 'THREE_UP', 'FOUR_UP', 'GRID', 'COMPACT_LIST', 'HORIZONTAL_LIST', 'IMAGE_LED', 'TEXT_LED',
+      ]);
       expect(draft.publishable).toBe(true);
       expect(draft.issues).toEqual([]);
     });
 
     it('returns an empty (non-null) active view when nothing was ever published', async () => {
       const db = new FakeHomepagePrisma();
-      const service = new HomepageService(db as any, {} as any);
+      const service = new HomepageService(db as any, {} as any, fakeLanguagesService() as any);
       await expect(service.getActive()).resolves.toMatchObject({ id: null, status: 'ACTIVE', version: 0, sections: [] });
     });
 

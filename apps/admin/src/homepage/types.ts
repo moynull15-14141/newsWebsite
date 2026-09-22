@@ -21,6 +21,9 @@ export interface Placement {
   article: StoryArticle;
 }
 
+/** Where a section's stories come from. MANUAL uses placements; the rest are resolved by the API. */
+export type SourceType = 'MANUAL' | 'LATEST' | 'CATEGORY' | 'TAG' | 'LOCATION';
+
 export interface DraftSection {
   id: string;
   key: string;
@@ -30,9 +33,15 @@ export interface DraftSection {
   sortOrder: number;
   maxItems: number;
   layoutType: string;
+  /** 'AUTO' lets the layout choose the card; anything else forces a NewsCard variant. */
+  cardVariant: string;
+  sourceType: SourceType;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   locationId: string | null;
+  location: { id: string; name: string; slug: string; type: string } | null;
+  tagId: string | null;
+  tag: { id: string; name: string; slug: string } | null;
   updatedAt: string;
   placements: Placement[];
 }
@@ -43,6 +52,8 @@ export interface Draft {
   version: number;
   updatedAt: string;
   layoutPresets: string[];
+  cardVariants: string[];
+  sourceTypes: SourceType[];
   hasUnpublishedChanges: boolean;
   publishable: boolean;
   issues: ApiIssue[];
@@ -102,7 +113,11 @@ export interface PreviewSection {
   type: string;
   title: string;
   layout: string;
+  cardVariant?: string;
+  sourceType?: string;
   category: { id: string; name: string; slug: string } | null;
+  tag?: { id: string; name: string; slug: string } | null;
+  location?: { id: string; name: string; slug: string; type: string } | null;
   articles: PreviewArticle[];
 }
 
