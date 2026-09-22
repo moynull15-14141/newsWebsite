@@ -28,6 +28,14 @@ describe('editorial story presentations', () => {
     expect(markup).toContain('src="/story.jpg"');
   });
 
+  it('falls back to the shared placeholder, never a broken <img>, when the lead story has no image', () => {
+    const noImage = { id: 'no-img', slug: 'no-img', title: 'Story with no photo', excerpt: 'Summary' };
+    const markup = renderToStaticMarkup(<LeadStory article={noImage} />);
+
+    expect(markup).not.toContain('<img');
+    expect(markup).toContain('Story with no photo');
+  });
+
   it('renders compact briefs and empty lists gracefully', () => {
     expect(renderToStaticMarkup(<BriefList title="Latest" articles={[article]} />)).toContain('Editorial headline');
     expect(renderToStaticMarkup(<BriefList title="Latest" articles={[]} />)).toBe('');

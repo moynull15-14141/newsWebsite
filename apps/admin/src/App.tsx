@@ -20,6 +20,7 @@ import TagsPage from './pages/TagsPage';
 import LocationsPage from './pages/LocationsPage';
 import UsersPage from './pages/UsersPage';
 import LanguagesPage from './pages/LanguagesPage';
+import SeoDashboardPage from './pages/SeoDashboardPage';
 
 function App() {
   return (
@@ -42,6 +43,7 @@ function App() {
         <Route path="comments" element={<CommentsPage />} />
         <Route path="ads" element={<AdsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="seo" element={<RequirePermission permission="analytics.view"><SeoDashboardPage /></RequirePermission>} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="tags" element={<TagsPage />} />
         <Route path="locations" element={<LocationsPage />} />

@@ -188,6 +188,16 @@ export class ArticlesService {
       throw new ForbiddenException('You can only edit your own articles');
     }
 
+    // Unlike create(), a saved article keeps resubmitting its own current slug on every save (the
+    // editor form always sends the loaded value), so this only rejects an actual collision with a
+    // *different* article rather than the article's own unchanged slug.
+    if (dto.slug !== undefined && dto.slug !== existing.slug) {
+      const slugOwner = await this.prisma.article.findUnique({ where: { slug: dto.slug } });
+      if (slugOwner && slugOwner.id !== id) {
+        throw new BadRequestException('Article with this slug already exists');
+      }
+    }
+
     const updateData: any = {};
 
     if (dto.title !== undefined) updateData.title = dto.title;

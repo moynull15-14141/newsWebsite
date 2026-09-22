@@ -37,6 +37,22 @@ describe('LocationsService', () => {
     await expect(service.findBySlug('unknown', 'DISTRICT')).rejects.toThrow(NotFoundException);
   });
 
+  it('nests the grandparent under parent, so a District carries its Division AND the Division\'s own parent (the country) for a real Bangladesh > Division > District breadcrumb in one call', async () => {
+    prisma.location.findFirst.mockResolvedValue({
+      slug: 'barisal',
+      type: 'DISTRICT',
+      parent: { type: 'DIVISION', name: 'Barisal Division', parent: { type: 'COUNTRY', name: 'Bangladesh' } },
+      children: [],
+    });
+
+    await service.findBySlug('barisal', 'DISTRICT');
+
+    const call = prisma.location.findFirst.mock.calls[0][0];
+    // The grandparent is included (not omitted) and itself carries translations, same as every other level.
+    expect(call.include.parent.include.parent).toBeTruthy();
+    expect(call.include.parent.include.parent.include.translations).toBeDefined();
+  });
+
   it('creates location with composite identityKey', async () => {
     // create() looks up twice: the identityKey must be free, and the parent must exist.
     prisma.location.findUnique.mockImplementation(({ where }: any) =>

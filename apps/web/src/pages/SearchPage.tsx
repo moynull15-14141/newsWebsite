@@ -66,11 +66,13 @@ export default function SearchPage() {
     queryFn: () => apiFetch(withLang('/locations', code)),
   });
 
-  const { data, isLoading } = useQuery<ApiResponse>({
+  const { data, isLoading, error } = useQuery<ApiResponse>({
     queryKey: ['search', query, page, category, location, dateFrom, dateTo, code],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (query) params.set('q', query);
+      // The DTO field is `search`, not `q` — `q` is only this PAGE's own URL param (/search?q=...);
+      // sending it straight through used to 400 (forbidNonWhitelisted rejects unknown properties).
+      if (query) params.set('search', query);
       params.set('page', String(page));
       params.set('limit', '20');
       if (category) params.set('category', category);
@@ -82,7 +84,8 @@ export default function SearchPage() {
       if (dateTo) params.set('dateTo', dateTo);
       return apiFetch(withLang(`/public/search?${params.toString()}`, code));
     },
-    enabled: true,
+    // Do not execute a meaningless search request before the reader has actually entered a term.
+    enabled: !!query.trim(),
   });
 
   const handleSearch = (e: React.FormEvent) => {
@@ -120,10 +123,13 @@ export default function SearchPage() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder={t('search.placeholder')}
+              aria-label={t('search.title')}
+              maxLength={200}
               className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
             <button
               type="submit"
+              aria-label={t('search.button')}
               className="rounded-lg bg-primary-500 px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-600"
             >
               {t('search.button')}
@@ -133,6 +139,7 @@ export default function SearchPage() {
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
+              aria-label={t('search.allCategories')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             >
               <option value="">{t('search.allCategories')}</option>
@@ -143,6 +150,7 @@ export default function SearchPage() {
             <select
               value={location}
               onChange={(e) => setLocation(e.target.value)}
+              aria-label={t('search.allLocations')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             >
               <option value="">{t('search.allLocations')}</option>
@@ -158,6 +166,7 @@ export default function SearchPage() {
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
               placeholder={t('search.fromDate')}
+              aria-label={t('search.fromDate')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
             <input
@@ -165,6 +174,7 @@ export default function SearchPage() {
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               placeholder={t('search.toDate')}
+              aria-label={t('search.toDate')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
           </div>
@@ -198,12 +208,21 @@ export default function SearchPage() {
           </div>
         )}
 
-        {query && !isLoading && (
+        {query && !isLoading && error && (
+          <div className="py-12 text-center text-gray-500">
+            <h2 className="text-lg font-semibold text-gray-900">{t('common.somethingWrong')}</h2>
+            <p className="mt-2">{t('common.unableToLoad')}</p>
+          </div>
+        )}
+
+        {query && !isLoading && !error && (
           <ArticleList
             articles={articles}
+            variant="horizontal"
             showPagination
             meta={meta}
             onPageChange={setPage}
+            emptyMessage={t('search.noResults')}
           />
         )}
       </div>

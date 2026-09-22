@@ -11,5 +11,10 @@ export default defineConfig({
     server: {
         port: 5173,
         host: true,
+        proxy: {
+            '/robots.txt': { target: 'http://localhost:3001', rewrite: function () { return '/api/v1/seo/robots.txt'; } },
+            '/sitemap.xml': { target: 'http://localhost:3001', rewrite: function () { return '/api/v1/seo/sitemap.xml'; } },
+            '/seo': { target: 'http://localhost:3001', rewrite: function (value) { return "/api/v1".concat(value); } },
+        },
     },
 });

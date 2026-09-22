@@ -122,11 +122,37 @@ export class MediaService {
     });
   }
 
+  /**
+   * Refuses to delete media that is still in active use. The FK columns (Article.featuredImageId,
+   * Ad.mediaId, EditorialCollection.coverImageId) are all `ON DELETE SET NULL`, so an unchecked delete
+   * would not fail loudly — it would silently blank out a live published article's featured image (or
+   * an ad's creative, or a collection's cover) and only then remove the file, leaving no way back.
+   * Images embedded inside an article's TipTap body content are plain URLs inside a JSON blob, not a
+   * tracked relation, so they can't be checked this way — deleting a body-embedded image will still
+   * 404 in that article. That is a known, structural limitation, not something this check can catch.
+   */
+  private async assertNotReferenced(id: string) {
+    const [articleCount, adCount, collectionCount] = await Promise.all([
+      this.prisma.article.count({ where: { featuredImageId: id } }),
+      this.prisma.ad.count({ where: { mediaId: id } }),
+      this.prisma.editorialCollection.count({ where: { coverImageId: id } }),
+    ]);
+    const reasons: string[] = [];
+    if (articleCount) reasons.push(`${articleCount} article${articleCount === 1 ? '' : 's'}`);
+    if (adCount) reasons.push(`${adCount} ad${adCount === 1 ? '' : 's'}`);
+    if (collectionCount) reasons.push(`${collectionCount} collection${collectionCount === 1 ? '' : 's'}`);
+    if (reasons.length) {
+      throw new BadRequestException(`Cannot delete: this media is still used as the featured image/cover for ${reasons.join(', ')}. Remove it from there first.`);
+    }
+  }
+
   async remove(id: string) {
     const existing = await this.prisma.media.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Media not found');
     }
+
+    await this.assertNotReferenced(id);
 
     await this.storage.delete(existing.storageKey);
     await this.prisma.media.delete({ where: { id } });

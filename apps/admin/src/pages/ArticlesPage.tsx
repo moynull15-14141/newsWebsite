@@ -1,9 +1,20 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
+import { buildArticleListQuery, getArticleActions } from '../lib/articles';
 import { Plus, Edit, Trash2, Send, Check, Globe, Archive, RotateCcw, Clock } from 'lucide-react';
+
+const actionIcons = {
+  edit: Edit,
+  'submit-review': Send,
+  approve: Check,
+  'return-to-draft': RotateCcw,
+  publish: Globe,
+  archive: Archive,
+  delete: Trash2,
+} as const;
 
 interface Article {
   id: string;
@@ -27,21 +38,33 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ArticlesPage() {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [languageFilter, setLanguageFilter] = useState('');
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['articles', page, search, statusFilter],
+    queryKey: ['articles', page, search, statusFilter, categoryFilter, languageFilter],
     queryFn: () =>
       apiFetch<{
         data: Article[];
         meta: { page: number; limit: number; total: number; totalPages: number };
-      }>(
-        `/articles?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}${statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ''}`,
-      ),
+      }>(buildArticleListQuery({ page, search, status: statusFilter, categoryId: categoryFilter, languageId: languageFilter })),
+  });
+
+  const { data: categories } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['categories'],
+    queryFn: () => apiFetch('/categories'),
+  });
+
+  const { data: languages } = useQuery<{ id: string; code: string; nativeName: string }[]>({
+    queryKey: ['languages'],
+    queryFn: () => apiFetch('/languages'),
   });
 
   const deleteMutation = useMutation({
@@ -55,36 +78,9 @@ export default function ArticlesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['articles'] }),
   });
 
-  const getActions = (article: Article) => {
-    const actions: { label: string; icon: React.ComponentType<{ className?: string }>; action: string; color?: string }[] = [];
-
-    if (hasPermission('article.edit')) {
-      actions.push({ label: 'Edit', icon: Edit, action: 'edit' });
-    }
-
-    if (article.status === 'DRAFT' && article.author) {
-      actions.push({ label: 'Submit Review', icon: Send, action: 'submit-review' });
-    }
-    if (article.status === 'IN_REVIEW' && hasPermission('article.review')) {
-      actions.push({ label: 'Approve', icon: Check, action: 'approve' });
-      actions.push({ label: 'Return to Draft', icon: RotateCcw, action: 'return-to-draft' });
-    }
-    if (article.status === 'APPROVED' && hasPermission('article.publish')) {
-      actions.push({ label: 'Publish', icon: Globe, action: 'publish' });
-    }
-    if (article.status === 'PUBLISHED' && hasPermission('article.publish')) {
-      actions.push({ label: 'Archive', icon: Archive, action: 'archive' });
-    }
-    if (hasPermission('article.delete')) {
-      actions.push({ label: 'Delete', icon: Trash2, action: 'delete', color: 'text-red-600' });
-    }
-
-    return actions;
-  };
-
   const handleAction = (article: Article, action: string) => {
     if (action === 'edit') {
-      window.location.href = `/articles/${article.id}/edit`;
+      navigate(`/articles/${article.id}/edit`);
     } else if (action === 'delete') {
       if (confirm('Are you sure you want to delete this article?')) {
         deleteMutation.mutate(article.id);
@@ -109,10 +105,17 @@ export default function ArticlesPage() {
         )}
       </div>
 
+      {(workflowMutation.isError || deleteMutation.isError) && (
+        <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {getApiErrorMessage(workflowMutation.error ?? deleteMutation.error, 'Action failed. Please try again.')}
+        </p>
+      )}
+
       <div className="mt-6 flex gap-4">
         <input
           type="text"
           placeholder="Search articles..."
+          aria-label="Search articles"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -120,6 +123,7 @@ export default function ArticlesPage() {
         <select
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          aria-label="Filter by status"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
         >
           <option value="">All Status</option>
@@ -129,6 +133,28 @@ export default function ArticlesPage() {
           <option value="PUBLISHED">Published</option>
           <option value="SCHEDULED">Scheduled</option>
           <option value="ARCHIVED">Archived</option>
+        </select>
+        <select
+          value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+          aria-label="Filter by category"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+        >
+          <option value="">All Categories</option>
+          {categories?.map((cat) => (
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
+          ))}
+        </select>
+        <select
+          value={languageFilter}
+          onChange={(e) => { setLanguageFilter(e.target.value); setPage(1); }}
+          aria-label="Filter by language"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+        >
+          <option value="">All Languages</option>
+          {languages?.map((lang) => (
+            <option key={lang.id} value={lang.id}>{lang.nativeName}</option>
+          ))}
         </select>
       </div>
 
@@ -178,16 +204,20 @@ export default function ArticlesPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-1">
-                      {getActions(article).map((a) => (
-                        <button
-                          key={a.action}
-                          onClick={() => handleAction(article, a.action)}
-                          className={`rounded p-1.5 hover:bg-gray-100 ${a.color || 'text-gray-500'}`}
-                          title={a.label}
-                        >
-                          <a.icon className="h-4 w-4" />
-                        </button>
-                      ))}
+                      {getArticleActions(article, hasPermission, currentUserId).map((a) => {
+                        const Icon = actionIcons[a.action];
+                        return (
+                          <button
+                            key={a.action}
+                            onClick={() => handleAction(article, a.action)}
+                            className={`rounded p-1.5 hover:bg-gray-100 ${a.action === 'delete' ? 'text-red-600' : 'text-gray-500'}`}
+                            title={a.label}
+                            aria-label={a.label}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </button>
+                        );
+                      })}
                     </div>
                   </td>
                 </tr>

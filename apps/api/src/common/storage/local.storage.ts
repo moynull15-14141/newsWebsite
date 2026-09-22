@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,8 +17,22 @@ export class LocalStorageProvider implements StorageProvider {
     }
   }
 
+  /**
+   * The key is always server-generated (MediaService never derives it from user input), so this never
+   * actually rejects a real request — it's a defense-in-depth invariant check at the storage layer
+   * itself, so a future caller can't accidentally write/read outside the upload directory.
+   */
+  private resolveSafePath(key: string): string {
+    const resolved = path.resolve(this.uploadPath, key);
+    const root = path.resolve(this.uploadPath);
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw new BadRequestException('Invalid storage key');
+    }
+    return resolved;
+  }
+
   async upload(file: Express.Multer.File, key: string): Promise<StorageUploadResult> {
-    const filePath = path.join(this.uploadPath, key);
+    const filePath = this.resolveSafePath(key);
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -34,7 +48,7 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   async delete(key: string): Promise<void> {
-    const filePath = path.join(this.uploadPath, key);
+    const filePath = this.resolveSafePath(key);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }

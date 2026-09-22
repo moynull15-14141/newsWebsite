@@ -5,6 +5,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from './media.service';
 import { UpdateMediaDto } from './dto/update-media.dto';
+import { UploadMediaDto } from './dto/upload-media.dto';
+import { QueryMediaDto } from './dto/query-media.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -24,29 +26,19 @@ export class MediaController {
   upload(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser('userId') userId: string,
-    @Body() body: { altText?: string; caption?: string; credit?: string },
+    @Body() body: UploadMediaDto,
   ) {
     return this.mediaService.upload(file, userId, body);
   }
 
   @Get()
   @RequirePermissions('media.upload')
-  findAll(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('mimeType') mimeType?: string,
-  ) {
-    return this.mediaService.findAll(
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
-      search,
-      mimeType,
-    );
+  findAll(@Query() query: QueryMediaDto) {
+    return this.mediaService.findAll(query.page, query.limit, query.search, query.mimeType);
   }
 
   @Get(':id')
-  @RequirePermissions('media.manage')
+  @RequirePermissions('media.upload')
   findOne(@Param('id') id: string) {
     return this.mediaService.findOne(id);
   }

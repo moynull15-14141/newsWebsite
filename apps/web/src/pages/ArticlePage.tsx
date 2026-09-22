@@ -51,7 +51,7 @@ interface Article {
   articleTags?: { tag: Tag }[];
   imageUrl?: string;
   featuredImageUrl?: string;
-  media?: { id: string; publicUrl: string };
+  media?: { id: string; publicUrl: string; altText?: string };
   _count?: { comments: number };
   corrections?: { id: string; description: string; correctedAt: string }[];
   language?: ArticleLanguage | null;
@@ -155,19 +155,26 @@ export default function ArticlePage() {
     ...otherTranslations.map((tr) => ({ code: tr.language.code, url: pathFor(`/article/${tr.slug}`, tr.language.code) })),
   ];
 
+  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+  const publicUrl = article.canonicalUrl || (typeof window !== 'undefined' ? `${pageOrigin}${window.location.pathname}` : `${pageOrigin}${pathFor(`/article/${article.slug}`, code)}`);
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'NewsArticle',
-    headline: article.title,
-    description: article.excerpt,
-    author: article.author ? { '@type': 'Person', name: article.author.name } : undefined,
-    datePublished: article.publishedAt,
-    image: imageUrl,
-    inLanguage: articleLanguageCode,
-    publisher: {
-      '@type': 'Organization',
-      name: 'BD News',
-    },
+    '@graph': [
+      {
+        '@type': 'NewsArticle', headline: article.title, description: article.seoDescription || article.excerpt,
+        image: imageUrl ? [imageUrl] : undefined, datePublished: article.publishedAt, dateModified: article.updatedAt || article.publishedAt,
+        author: article.author ? { '@type': 'Person', name: article.author.name, url: `${pageOrigin}${pathFor(`/author/${article.author.id}`, code)}` } : undefined,
+        publisher: { '@id': `${pageOrigin}/#publisher` }, mainEntityOfPage: publicUrl ? { '@type': 'WebPage', '@id': publicUrl } : undefined,
+        articleSection: article.category?.name, keywords: tags.map((tag) => tag.name).join(', ') || article.seoKeywords, inLanguage: articleLanguageCode,
+        contentLocation: article.location ? { '@type': 'Place', name: article.location.name } : undefined,
+      },
+      { '@type': 'NewsMediaOrganization', '@id': `${pageOrigin}/#publisher`, name: 'BD News', url: pageOrigin },
+      { '@type': 'BreadcrumbList', itemListElement: [
+        { '@type': 'ListItem', position: 1, name: t('common.home'), item: `${pageOrigin}${pathFor('/', code)}` },
+        ...(article.category ? [{ '@type': 'ListItem', position: 2, name: article.category.name, item: `${pageOrigin}${pathFor(`/category/${article.category.slug}`, code)}` }] : []),
+        { '@type': 'ListItem', position: article.category ? 3 : 2, name: article.title, item: publicUrl },
+      ] },
+    ],
   };
 
   return (
@@ -256,7 +263,7 @@ export default function ArticlePage() {
 
         {imageUrl && (
           <figure className="my-8">
-            <img src={imageUrl} alt={article.title} className="w-full rounded-lg" />
+            <img src={imageUrl} alt={article.media?.altText || article.title} className="w-full rounded-lg" />
           </figure>
         )}
 

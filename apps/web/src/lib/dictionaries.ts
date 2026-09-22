@@ -46,19 +46,15 @@ const en = {
   'common.404Body': "The page you're looking for doesn't exist or has moved.",
   'common.backHome': 'Go back home',
   'common.goBackHome': 'Go back home',
+  'common.latestDescription': 'The latest published stories from BD News, newest first.',
 
   'nav.bangladesh': 'Bangladesh',
-  'nav.world': 'World',
-  'nav.politics': 'Politics',
-  'nav.business': 'Business',
-  'nav.sports': 'Sports',
-  'nav.technology': 'Technology',
-  'nav.entertainment': 'Entertainment',
 
   'header.siteName': 'BD News',
   'header.search': 'Search',
   'header.searchAria': 'Search articles',
   'header.notifications': 'Notifications',
+  'header.primaryNav': 'Main navigation',
 
   'footer.quickLinks': 'Quick Links',
   'footer.about': 'About',
@@ -84,6 +80,7 @@ const en = {
   'search.resultsCount': '{count} results',
   'search.resultsCountFor': '{count} results for “{query}”',
   'search.enterTerm': 'Enter a search term to find articles.',
+  'search.noResults': 'No published stories found for this search.',
 
   'tag.articles': 'articles',
   'author.articles': 'articles',
@@ -158,19 +155,15 @@ const bn: Record<keyof typeof en, string> = {
   'common.404Body': 'আপনি যে পৃষ্ঠাটি খুঁজছেন তা নেই অথবা সরিয়ে ফেলা হয়েছে।',
   'common.backHome': 'হোমপেজে ফিরে যান',
   'common.goBackHome': 'হোমপেজে ফিরে যান',
+  'common.latestDescription': 'বিডি নিউজের সর্বশেষ প্রকাশিত সংবাদ, নতুন থেকে পুরনো ক্রমে।',
 
   'nav.bangladesh': 'বাংলাদেশ',
-  'nav.world': 'বিশ্ব',
-  'nav.politics': 'রাজনীতি',
-  'nav.business': 'ব্যবসা',
-  'nav.sports': 'খেলা',
-  'nav.technology': 'প্রযুক্তি',
-  'nav.entertainment': 'বিনোদন',
 
   'header.siteName': 'বিডি নিউজ',
   'header.search': 'অনুসন্ধান',
   'header.searchAria': 'সংবাদ অনুসন্ধান করুন',
   'header.notifications': 'বিজ্ঞপ্তি',
+  'header.primaryNav': 'প্রধান মেনু',
 
   'footer.quickLinks': 'দ্রুত লিংক',
   'footer.about': 'পরিচিতি',
@@ -196,6 +189,7 @@ const bn: Record<keyof typeof en, string> = {
   'search.resultsCount': '{count}টি ফলাফল',
   'search.resultsCountFor': '“{query}”-এর জন্য {count}টি ফলাফল',
   'search.enterTerm': 'সংবাদ খুঁজতে একটি অনুসন্ধান শব্দ লিখুন।',
+  'search.noResults': 'এই অনুসন্ধানের জন্য কোনো প্রকাশিত সংবাদ পাওয়া যায়নি।',
 
   'tag.articles': 'টি সংবাদ',
   'author.articles': 'টি সংবাদ',

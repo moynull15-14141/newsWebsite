@@ -9,7 +9,7 @@ describe('SeoService (language-aware sitemap)', () => {
   let languagesService: any;
 
   beforeEach(async () => {
-    prisma = { article: { findMany: jest.fn() } };
+    prisma = { article: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() } };
     languagesService = { getDefault: jest.fn().mockResolvedValue({ id: 'lang-bn', code: 'bn', isDefault: true }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -49,11 +49,19 @@ describe('SeoService (language-aware sitemap)', () => {
       expect(xml).toContain('<loc>http://localhost:5173/article/legacy</loc>');
     });
 
-    it('always includes the static homepage and Bangladesh URLs', async () => {
-      prisma.article.findMany.mockResolvedValueOnce([]);
-      const xml = await service.getSitemap();
+    it('includes static crawlable pages in the page sitemap', () => {
+      const xml = service.getPageSitemap();
       expect(xml).toContain('<loc>http://localhost:5173/</loc>');
+      expect(xml).toContain('<loc>http://localhost:5173/latest</loc>');
       expect(xml).toContain('<loc>http://localhost:5173/bangladesh</loc>');
+    });
+
+    it('publishes a sitemap index for each public entity type', () => {
+      const xml = service.getSitemapIndex();
+      expect(xml).toContain('<sitemapindex');
+      expect(xml).toContain('article-sitemap.xml');
+      expect(xml).toContain('category-sitemap.xml');
+      expect(xml).toContain('location-sitemap.xml');
     });
   });
 
@@ -68,6 +76,35 @@ describe('SeoService (language-aware sitemap)', () => {
       expect(xml).toContain('<news:language>bn</news:language>');
       expect(xml).toContain('http://localhost:5173/en/article/en-story');
       expect(xml).toContain('http://localhost:5173/article/bn-story');
+    });
+  });
+
+  describe('article analysis and site health', () => {
+    const article = {
+      id: 'article-1', title: 'A sufficiently descriptive Bangladesh report title', slug: 'bangladesh-report',
+      excerpt: 'A useful and concise summary explaining the central news development and the people affected by it today.',
+      content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Details' }] }, { type: 'paragraph', content: [{ type: 'text', text: 'Reported detail. '.repeat(80) }] }] },
+      seoTitle: null, seoDescription: null, seoKeywords: 'Bangladesh report', canonicalUrl: null, noIndex: false,
+      status: 'PUBLISHED', publishedAt: new Date('2026-09-20'), updatedAt: new Date('2026-09-21'), categoryId: 'category-1',
+      locationId: 'location-1', authorId: 'author-1', translationGroupId: null, media: { publicUrl: 'https://cdn.test/photo.jpg', altText: 'News scene' },
+    };
+
+    it('uses database duplicate checks in article analysis', async () => {
+      prisma.article.findUnique.mockResolvedValue(article);
+      prisma.article.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+      const result = await service.analyzeArticle(article.id);
+      expect(result.checks.find((item) => item.id === 'duplicate-title')?.status).toBe('ERROR');
+      expect(result.score).toBeGreaterThanOrEqual(0);
+      expect(result.completion).toBeGreaterThanOrEqual(0);
+    });
+
+    it('aggregates actual analyzed articles into distribution and issues', async () => {
+      prisma.article.findMany.mockResolvedValue([{ ...article }, { ...article, id: 'article-2', slug: 'second-report' }]);
+      const health = await service.getSiteHealth();
+      expect(health.analyzedArticles).toBe(2);
+      expect(Object.values(health.distribution).reduce((sum, value) => sum + value, 0)).toBe(2);
+      expect(health.technical.indexablePublishedArticles).toBe(2);
+      expect(health.issues.some((item) => item.id === 'duplicate-title')).toBe(true);
     });
   });
 });

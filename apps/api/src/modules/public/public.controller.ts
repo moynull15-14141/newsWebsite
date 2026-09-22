@@ -32,15 +32,39 @@ export class PublicController {
   }
 
   @Public()
+  @Get('tags/:slug')
+  getTag(@Param('slug') slug: string) {
+    return this.publicService.getTag(slug);
+  }
+
+  @Public()
+  @Get('authors/:id')
+  getAuthorProfile(@Param('id') id: string) {
+    return this.publicService.getAuthorProfile(id);
+  }
+
+  @Public()
   @Get('authors/:id/articles')
   getArticlesByAuthor(@Param('id') id: string, @Query() query: PublicArticleQueryDto) {
     return this.publicService.getArticlesByAuthor(id, query);
   }
 
   @Public()
+  @Get('locations')
+  getLocations() {
+    return this.publicService.getLocations();
+  }
+
+  @Public()
   @Get('locations/:slug/articles')
   getArticlesByLocation(@Param('slug') slug: string, @Query() query: PublicArticleQueryDto) {
     return this.publicService.getArticlesByLocation(slug, query, query.locationType);
+  }
+
+  @Public()
+  @Get('locations/:slug')
+  getLocation(@Param('slug') slug: string, @Query('locationType') locationType?: string) {
+    return this.publicService.getLocation(slug, locationType);
   }
 
   @Public()

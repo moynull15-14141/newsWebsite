@@ -31,6 +31,8 @@ interface ArticleListProps {
   showPagination?: boolean;
   meta?: Meta;
   onPageChange?: (page: number) => void;
+  /** Overrides the generic "No articles found" text for a context-specific empty state (e.g. search). */
+  emptyMessage?: string;
 }
 
 export default function ArticleList({
@@ -41,13 +43,14 @@ export default function ArticleList({
   showPagination = false,
   meta,
   onPageChange,
+  emptyMessage,
 }: ArticleListProps) {
   const { t } = useLanguage();
 
   if (!articles.length) {
     return (
       <div className="py-12 text-center">
-        <p className="text-neutral-500">{t('common.noArticlesFound')}</p>
+        <p className="text-neutral-500">{emptyMessage ?? t('common.noArticlesFound')}</p>
       </div>
     );
   }

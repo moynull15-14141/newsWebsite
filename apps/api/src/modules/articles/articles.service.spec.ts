@@ -172,6 +172,43 @@ describe('ArticlesService', () => {
         service.update('nonexistent', { title: 'Updated' }, 'user-1', []),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('should allow resubmitting the article\'s own unchanged slug', async () => {
+      prisma.article.findUnique.mockResolvedValueOnce(mockArticle); // existing lookup
+      prisma.article.update.mockResolvedValue({ ...mockArticle, title: 'Updated' });
+      prisma.articleTag.deleteMany.mockResolvedValue({});
+
+      const result = await service.update(
+        'article-1',
+        { title: 'Updated', slug: mockArticle.slug },
+        'user-1',
+        [],
+      );
+      expect(result.title).toBe('Updated');
+      // Only the "existing" lookup should have run; no slug-collision lookup for an unchanged slug.
+      expect(prisma.article.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw BadRequestException when changing to a slug owned by another article', async () => {
+      prisma.article.findUnique
+        .mockResolvedValueOnce(mockArticle) // existing lookup
+        .mockResolvedValueOnce({ ...mockArticle, id: 'article-2', slug: 'taken-slug' }); // slug owner
+
+      await expect(
+        service.update('article-1', { slug: 'taken-slug' }, 'user-1', []),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should allow changing to a genuinely free slug', async () => {
+      prisma.article.findUnique
+        .mockResolvedValueOnce(mockArticle) // existing lookup
+        .mockResolvedValueOnce(null); // slug free
+      prisma.article.update.mockResolvedValue({ ...mockArticle, slug: 'new-slug' });
+      prisma.articleTag.deleteMany.mockResolvedValue({});
+
+      const result = await service.update('article-1', { slug: 'new-slug' }, 'user-1', []);
+      expect(result.slug).toBe('new-slug');
+    });
   });
 
   describe('remove', () => {

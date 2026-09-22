@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PublicArticleQueryDto {
@@ -15,8 +15,11 @@ export class PublicArticleQueryDto {
   @Max(100)
   limit?: number = 20;
 
+  /** Matched against title/excerpt (see PublicService.getArticles). Capped well above any real search
+   *  phrase so a malformed/abusive request is rejected with a clear 400 rather than reaching the DB. */
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   search?: string;
 
   @IsOptional()

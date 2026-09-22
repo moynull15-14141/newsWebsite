@@ -11,10 +11,12 @@
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "test:e2e:aiven": "jest --runInBand --testRegex public.aiven-e2e.ts$",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
   },
   "dependencies": {
+    "@news-platform/seo": "0.1.0",
     "@aws-sdk/client-s3": "^3.1127.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.2.0",

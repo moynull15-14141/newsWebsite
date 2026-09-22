@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { localizedField } from '@/lib/localize';
+import { buildSearchUrl } from '@/lib/search-url';
 import { Menu, X, Search, AlertTriangle, UserRound, Bell } from 'lucide-react';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 import { Button } from './Button';
@@ -9,15 +11,27 @@ import { IconButton } from './IconButton';
 import { getHeaderControlLabels } from './header-controls';
 import { useLanguage } from '@/lib/i18n';
 
-const navKeys = [
-  { key: 'nav.bangladesh', href: '/bangladesh' },
-  { key: 'nav.world', href: '/category/world' },
-  { key: 'nav.politics', href: '/category/politics' },
-  { key: 'nav.business', href: '/category/business' },
-  { key: 'nav.sports', href: '/category/sports' },
-  { key: 'nav.technology', href: '/category/technology' },
-  { key: 'nav.entertainment', href: '/category/entertainment' },
+/**
+ * Two entries are structurally special, not categories: "Latest" is the unfiltered published feed and
+ * has no taxonomy row at all; "Bangladesh" is a Location (the country), not the like-named Category —
+ * `/bangladesh` is richer (it aggregates every location under it) than the Bangladesh category tag would
+ * be, so the nav deliberately points there. Both are fixed; everything else is real category data below.
+ */
+const FIXED_NAV = [
+  { labelKey: 'common.latest', href: '/latest' },
+  { labelKey: 'nav.bangladesh', href: '/bangladesh' },
 ] as const;
+
+/** Nav item count from real categories, capped so the desktop bar never overflows (Part 16). Editors
+ *  already control which categories lead via `sortOrder` (see CategoriesPage); this just respects it. */
+const MAX_CATEGORY_NAV_ITEMS = 6;
+
+interface NavCategory {
+  id: string;
+  name: string;
+  slug: string;
+  translations?: { language?: { code: string } | null; name: string }[];
+}
 
 interface BreakingArticle {
   id: string;
@@ -60,6 +74,7 @@ export default function Header() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useReaderAuthStore((state) => state.user);
   const { code, t, pathFor } = useLanguage();
   const controlLabels = getHeaderControlLabels(searchOpen, mobileOpen);
@@ -73,10 +88,32 @@ export default function Header() {
 
   const breakingCount = breakingNews?.length || 0;
 
+  // Real taxonomy, not a hardcoded list — GET /categories is already public and sortOrder-ordered
+  // (editors control that order in the Admin Categories page), so the nav follows editorial curation.
+  const { data: categories } = useQuery<NavCategory[]>({
+    queryKey: ['nav-categories'],
+    queryFn: () => apiFetch('/categories'),
+    staleTime: 5 * 60_000,
+  });
+
+  const navItems = [
+    ...FIXED_NAV.map((item) => ({ href: item.href, label: t(item.labelKey) })),
+    ...(categories ?? [])
+      .filter((category) => category.slug !== 'bangladesh') // covered by the fixed Bangladesh (location) entry above
+      .slice(0, MAX_CATEGORY_NAV_ITEMS)
+      .map((category) => ({ href: `/category/${category.slug}`, label: localizedField(category.name, category.translations, code, 'name') ?? category.name })),
+  ];
+
+  const isActiveNavPath = (href: string) => {
+    const target = link(href);
+    return location.pathname === target || location.pathname === `${target}/`;
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`${link('/search')}?q=${encodeURIComponent(searchQuery.trim())}`);
+    const target = buildSearchUrl(link('/search'), searchQuery);
+    if (target) {
+      navigate(target);
       setSearchQuery('');
       setSearchOpen(false);
     }
@@ -103,14 +140,15 @@ export default function Header() {
             )}
           </Link>
 
-          <nav className="hidden items-center gap-1 lg:flex">
-            {navKeys.map((item) => (
+          <nav aria-label={t('header.primaryNav')} className="hidden items-center gap-1 lg:flex">
+            {navItems.map((item) => (
               <Link
                 key={item.href}
                 to={link(item.href)}
-                className="nav rounded px-3 py-2 text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-primary-500"
+                aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
+                className={`nav rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
               >
-                {t(item.key)}
+                {item.label}
               </Link>
             ))}
           </nav>
@@ -165,6 +203,7 @@ export default function Header() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('common.searchArticles')}
                 aria-label={t('header.searchAria')}
+                maxLength={200}
                 autoFocus={searchOpen}
                 className="flex-1 rounded-lg border border-neutral-300 px-4 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
               />
@@ -176,17 +215,19 @@ export default function Header() {
 
         <nav
           id="mobile-navigation"
+          aria-label={t('header.primaryNav')}
           hidden={!mobileOpen}
           className="border-t border-neutral-100 py-3 lg:hidden"
         >
-            {navKeys.map((item) => (
+            {navItems.map((item) => (
               <Link
                 key={item.href}
                 to={link(item.href)}
                 onClick={() => setMobileOpen(false)}
-                className="nav block px-3 py-2.5 text-neutral-700 transition-colors hover:bg-neutral-50 hover:text-primary-500"
+                aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
+                className={`nav block px-3 py-2.5 transition-colors hover:bg-neutral-50 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
               >
-                {t(item.key)}
+                {item.label}
               </Link>
             ))}
         </nav>

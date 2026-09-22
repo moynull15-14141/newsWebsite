@@ -2,6 +2,7 @@ import { HomepageSourceType, Prisma, PrismaClient } from '@prisma/client';
 import { isPubliclyEligible, publicArticleWhere } from '../articles/public-eligibility';
 import { ARTICLE_SELECT } from '../public/public-article-select';
 import { articleLanguageWhere, LanguageFilter, matchesLanguage } from '../../common/i18n/article-language';
+import { loadLocationFamilies } from '../../common/location/location-descendants';
 import { isManualSource, MAX_SECTION_ITEMS } from './homepage.constants';
 
 /**
@@ -82,20 +83,6 @@ function sourceWhere(
         : sourceType === 'LOCATION' ? { locationId: { in: locationIds } }
           : {};
   return language ? { ...base, ...specific, AND: [articleLanguageWhere(language)] } : { ...base, ...specific };
-}
-
-/** Direct children of each requested location, fetched in one query. */
-async function loadLocationFamilies(prisma: LocationReader, parentIds: string[]): Promise<Map<string, string[]>> {
-  const families = new Map<string, string[]>(parentIds.map((id) => [id, [id]]));
-  if (!parentIds.length) return families;
-  const children = await prisma.location.findMany({
-    where: { parentId: { in: parentIds } },
-    select: { id: true, parentId: true },
-  });
-  for (const child of children) {
-    if (child.parentId) families.get(child.parentId)?.push(child.id);
-  }
-  return families;
 }
 
 /**

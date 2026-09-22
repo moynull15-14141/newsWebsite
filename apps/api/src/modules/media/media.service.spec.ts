@@ -45,6 +45,7 @@ describe('MediaService', () => {
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks(); // mockStorage's jest.fn()s are module-scoped, so call counts must be cleared per test.
     prisma = {
       media: {
         create: jest.fn(),
@@ -54,6 +55,10 @@ describe('MediaService', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      // Referenced-media protection (remove()) checks these three relations before deleting.
+      article: { count: jest.fn().mockResolvedValue(0) },
+      ad: { count: jest.fn().mockResolvedValue(0) },
+      editorialCollection: { count: jest.fn().mockResolvedValue(0) },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -97,6 +102,29 @@ describe('MediaService', () => {
       );
       expect(result).toEqual(mockMedia);
     });
+
+    it('generates a distinct storage key per upload, even for two files sharing the same original filename (collision avoidance)', async () => {
+      prisma.media.create.mockResolvedValue(mockMedia);
+
+      await service.upload(mockFile, 'u1', {});
+      await service.upload(mockFile, 'u1', {});
+
+      const keys = (storage.upload as jest.Mock).mock.calls.map(([, key]) => key);
+      expect(keys[0]).not.toBe(keys[1]);
+      // Server-generated, never the raw original filename — the actual collision-avoidance mechanism.
+      expect(keys[0]).toMatch(/^media\/[a-z0-9]+-[a-z0-9]+\.jpg$/);
+    });
+
+    it('derives the extension from the validated MIME type, not the (unsanitized) original filename', async () => {
+      prisma.media.create.mockResolvedValue(mockMedia);
+      const trickyName = { ...mockFile, originalname: '../../evil.jpg' };
+
+      await service.upload(trickyName, 'u1', {});
+
+      const [, key] = (storage.upload as jest.Mock).mock.calls[0];
+      expect(key).not.toContain('..');
+      expect(key.startsWith('media/')).toBe(true);
+    });
   });
 
   describe('findAll', () => {
@@ -109,6 +137,44 @@ describe('MediaService', () => {
       expect(result.data).toEqual([mockMedia]);
       expect(result.meta.total).toBe(1);
       expect(result.meta.page).toBe(1);
+    });
+
+    it('searches by original filename or alt text', async () => {
+      prisma.media.findMany.mockResolvedValue([]);
+      prisma.media.count.mockResolvedValue(0);
+
+      await service.findAll(1, 20, 'sunset');
+
+      expect(prisma.media.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [
+              { originalFilename: { contains: 'sunset', mode: 'insensitive' } },
+              { altText: { contains: 'sunset', mode: 'insensitive' } },
+            ],
+          }),
+        }),
+      );
+    });
+
+    it('filters by mimeType', async () => {
+      prisma.media.findMany.mockResolvedValue([]);
+      prisma.media.count.mockResolvedValue(0);
+
+      await service.findAll(1, 20, undefined, 'image/png');
+
+      expect(prisma.media.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ mimeType: 'image/png' }) }),
+      );
+    });
+
+    it('paginates at the database level (skip/take), never loading everything', async () => {
+      prisma.media.findMany.mockResolvedValue([]);
+      prisma.media.count.mockResolvedValue(0);
+
+      await service.findAll(3, 10);
+
+      expect(prisma.media.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
     });
   });
 
@@ -152,6 +218,49 @@ describe('MediaService', () => {
       prisma.media.findUnique.mockResolvedValue(null);
 
       await expect(service.remove('non-existent')).rejects.toThrow(NotFoundException);
+    });
+
+    it('refuses to delete media still used as an article featured image', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.article.count.mockResolvedValue(1);
+
+      await expect(service.remove('1')).rejects.toThrow(BadRequestException);
+      expect(storage.delete).not.toHaveBeenCalled();
+      expect(prisma.media.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete media still used as an ad creative', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.ad.count.mockResolvedValue(1);
+
+      await expect(service.remove('1')).rejects.toThrow(BadRequestException);
+      expect(prisma.media.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete media still used as a collection cover', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.editorialCollection.count.mockResolvedValue(1);
+
+      await expect(service.remove('1')).rejects.toThrow(BadRequestException);
+      expect(prisma.media.delete).not.toHaveBeenCalled();
+    });
+
+    it('names what is referencing it in the error message', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.article.count.mockResolvedValue(2);
+
+      await expect(service.remove('1')).rejects.toThrow(/2 articles/);
+    });
+
+    it('allows deleting media that nothing references', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.media.delete.mockResolvedValue(mockMedia);
+      // article/ad/editorialCollection counts already default to 0 in beforeEach.
+
+      const result = await service.remove('1');
+
+      expect(result.message).toBe('Media deleted successfully');
+      expect(storage.delete).toHaveBeenCalledWith('media/test.jpg');
     });
   });
 });

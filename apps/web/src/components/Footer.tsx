@@ -1,16 +1,37 @@
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
+import { localizedField } from '@/lib/localize';
 import { useLanguage } from '@/lib/i18n';
 
-const quickLinkKeys = [
-  { key: 'nav.bangladesh', href: '/bangladesh' },
-  { key: 'nav.world', href: '/category/world' },
-  { key: 'nav.politics', href: '/category/politics' },
-  { key: 'nav.business', href: '/category/business' },
-  { key: 'nav.sports', href: '/category/sports' },
-] as const;
+/** "Bangladesh" here is the Location (country), not the like-named Category — see Header.tsx. */
+const FIXED_QUICK_LINKS = [{ labelKey: 'common.latest', href: '/latest' }, { labelKey: 'nav.bangladesh', href: '/bangladesh' }] as const;
+const MAX_CATEGORY_QUICK_LINKS = 3;
+
+interface NavCategory {
+  id: string;
+  name: string;
+  slug: string;
+  translations?: { language?: { code: string } | null; name: string }[];
+}
 
 export default function Footer() {
   const { code, t, pathFor } = useLanguage();
+
+  // Same query key as Header's nav fetch — one shared cache entry, not a second request (Part 17).
+  const { data: categories } = useQuery<NavCategory[]>({
+    queryKey: ['nav-categories'],
+    queryFn: () => apiFetch('/categories'),
+    staleTime: 5 * 60_000,
+  });
+
+  const quickLinks = [
+    ...FIXED_QUICK_LINKS.map((item) => ({ href: item.href, label: t(item.labelKey) })),
+    ...(categories ?? [])
+      .filter((category) => category.slug !== 'bangladesh')
+      .slice(0, MAX_CATEGORY_QUICK_LINKS)
+      .map((category) => ({ href: `/category/${category.slug}`, label: localizedField(category.name, category.translations, code, 'name') ?? category.name })),
+  ];
 
   return (
     <footer className="border-t border-neutral-200 bg-neutral-900 text-neutral-300">
@@ -30,13 +51,13 @@ export default function Footer() {
               {t('footer.quickLinks')}
             </h3>
             <ul className="space-y-2">
-              {quickLinkKeys.map((link) => (
+              {quickLinks.map((link) => (
                 <li key={link.href}>
                   <Link
                     to={pathFor(link.href, code)}
                     className="text-sm text-neutral-400 transition-colors hover:text-white"
                   >
-                    {t(link.key)}
+                    {link.label}
                   </Link>
                 </li>
               ))}

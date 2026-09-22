@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 import { useLanguage } from '@/lib/i18n';
+import SeoHead from '@/components/SeoHead';
 
 interface BookmarkItem { id: string; articleId: string; article: { slug: string; title: string }; }
 interface NotificationItem { id: string; title: string; body: string; readAt?: string; createdAt: string; }
@@ -11,7 +12,7 @@ interface PaginatedResponse<T> { data: T[]; }
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { code, pathFor } = useLanguage();
-  return useReaderAuthStore.getState().user ? <>{children}</> : <Navigate to={pathFor('/login', code)} replace />;
+  return useReaderAuthStore.getState().user ? <><SeoHead title="Reader account" noIndex />{children}</> : <Navigate to={pathFor('/login', code)} replace />;
 }
 
 export function AccountPage() {

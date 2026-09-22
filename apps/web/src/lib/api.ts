@@ -6,6 +6,24 @@ export function withLang(endpoint: string, code: string): string {
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}lang=${encodeURIComponent(code)}`;
 }
 
+/**
+ * Failed API call, carrying the real HTTP status. Message stays `API error: <status>` — the format every
+ * existing `.message`-only consumer already expects — so this is purely additive. A page that needs to
+ * tell "this category doesn't exist" (404) apart from "the API is down" (5xx/network) reads `.status`.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`API error: ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const auth = useReaderAuthStore.getState();
   const headers = { 'Content-Type': 'application/json', ...(options?.headers || {}), ...(auth.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) };
@@ -24,7 +42,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
     }
   }
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+    throw new ApiError(response.status);
   }
   return response.json();
 }

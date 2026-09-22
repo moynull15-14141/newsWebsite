@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
+import { formatFileSize } from '../lib/media';
 import { Upload, Search, Trash2, Edit, X, Image as ImageIcon } from 'lucide-react';
 
 interface MediaItem {
@@ -19,14 +20,6 @@ interface MediaItem {
   height: number | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 export default function MediaPage() {
@@ -124,10 +117,11 @@ export default function MediaPage() {
 
       <div className="mt-6 flex gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <input
             type="text"
             placeholder="Search media..."
+            aria-label="Search media"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="w-full rounded-md border border-gray-300 py-2 pl-10 pr-3 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -136,8 +130,14 @@ export default function MediaPage() {
       </div>
 
       {uploadMutation.isError && (
-        <div className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-700">
-          Upload failed: {(uploadMutation.error as Error).message}
+        <div role="alert" className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-700">
+          Upload failed: {getApiErrorMessage(uploadMutation.error, 'Please try again.')}
+        </div>
+      )}
+
+      {deleteMutation.isError && (
+        <div role="alert" className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-700">
+          {getApiErrorMessage(deleteMutation.error, 'Delete failed. Please try again.')}
         </div>
       )}
 
@@ -172,10 +172,11 @@ export default function MediaPage() {
                 <p className="text-xs text-gray-400">{item.uploadedBy?.name}</p>
                 <p className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleDateString()}</p>
               </div>
-              <div className="absolute right-1 top-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                 {hasPermission('media.manage') && (
                   <button
                     onClick={() => handleEdit(item)}
+                    aria-label={`Edit ${item.originalFilename}`}
                     className="rounded bg-white p-1.5 shadow-sm hover:bg-gray-100"
                   >
                     <Edit className="h-3 w-3 text-gray-600" />
@@ -184,6 +185,7 @@ export default function MediaPage() {
                 {hasPermission('media.manage') && (
                   <button
                     onClick={() => handleDelete(item.id)}
+                    aria-label={`Delete ${item.originalFilename}`}
                     className="rounded bg-white p-1.5 shadow-sm hover:bg-gray-100"
                   >
                     <Trash2 className="h-3 w-3 text-red-600" />
@@ -220,11 +222,11 @@ export default function MediaPage() {
       )}
 
       {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-labelledby="edit-media-title">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Edit Media</h2>
-              <button onClick={() => setEditingItem(null)} className="text-gray-400 hover:text-gray-600">
+              <h2 id="edit-media-title" className="text-lg font-semibold text-gray-900">Edit Media</h2>
+              <button onClick={() => setEditingItem(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -237,8 +239,9 @@ export default function MediaPage() {
               />
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Alt Text</label>
+                  <label htmlFor="media-alt-text" className="block text-sm font-medium text-gray-700">Alt Text</label>
                   <input
+                    id="media-alt-text"
                     type="text"
                     value={altText}
                     onChange={(e) => setAltText(e.target.value)}
@@ -246,8 +249,9 @@ export default function MediaPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Caption</label>
+                  <label htmlFor="media-caption" className="block text-sm font-medium text-gray-700">Caption</label>
                   <textarea
+                    id="media-caption"
                     value={caption}
                     onChange={(e) => setCaption(e.target.value)}
                     rows={2}
@@ -255,8 +259,9 @@ export default function MediaPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Credit</label>
+                  <label htmlFor="media-credit" className="block text-sm font-medium text-gray-700">Credit</label>
                   <input
+                    id="media-credit"
                     type="text"
                     value={credit}
                     onChange={(e) => setCredit(e.target.value)}

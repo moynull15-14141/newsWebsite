@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import HomePage from './pages/HomePage';
+import LatestPage from './pages/LatestPage';
 import CategoryPage from './pages/CategoryPage';
 import ArticlePage from './pages/ArticlePage';
 import TagPage from './pages/TagPage';
@@ -26,6 +27,7 @@ import { LanguageProvider } from './lib/i18n';
 function contentRoutes() {
   return [
     <Route key="home" index element={<HomePage />} />,
+    <Route key="latest" path="latest" element={<LatestPage />} />,
     <Route key="category" path="category/:slug" element={<CategoryPage />} />,
     <Route key="article" path="article/:slug" element={<ArticlePage />} />,
     <Route key="tag" path="tag/:slug" element={<TagPage />} />,

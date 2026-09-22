@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
-import RichTextEditor from '../components/RichTextEditor';
+import { validateArticleDraft } from '../lib/articles';
+import RichTextEditor, { type RichTextEditorHandle } from '../components/RichTextEditor';
 import LocationSelector from '../components/LocationSelector';
 import CategorySelector from '../components/CategorySelector';
 import TagSelector from '../components/TagSelector';
+import SeoIntelligencePanel from '../components/SeoIntelligencePanel';
+import type { SeoAnalysis } from '@news-platform/seo';
 import { Save, Send, Check, Globe, ArrowLeft, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus } from 'lucide-react';
 
 interface MediaItem {
@@ -45,6 +48,8 @@ interface ArticleData {
   breakingPriority: number | null;
   breakingEndsAt: string | null;
   scheduledAt: string | null;
+  publishedAt?: string | null;
+  updatedAt?: string | null;
   articleTags: { tag: { id: string; name: string } }[];
   language?: ArticleLanguage | null;
 }
@@ -71,6 +76,7 @@ export default function ArticleEditorPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -87,21 +93,32 @@ export default function ArticleEditorPage() {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [locationId, setLocationId] = useState('');
   const [featuredImageId, setFeaturedImageId] = useState<string | null>(null);
-  const [showMediaBrowser, setShowMediaBrowser] = useState(false);
+  // 'featured' picks the article's featured image; 'body' inserts into the TipTap content at the
+  // cursor — same picker, same upload flow, just a different action on selection (Part 10/12).
+  const [mediaBrowserMode, setMediaBrowserMode] = useState<'featured' | 'body' | null>(null);
   const [mediaPage, setMediaPage] = useState(1);
   const [mediaSearch, setMediaSearch] = useState('');
   const [uploadedMedia, setUploadedMedia] = useState<MediaItem | null>(null);
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
+  const richTextEditorRef = useRef<RichTextEditorHandle>(null);
   const [isBreaking, setIsBreaking] = useState(false);
   const [breakingPriority, setBreakingPriority] = useState<number>(1);
   const [breakingEndsAt, setBreakingEndsAt] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [changeReason, setChangeReason] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const { data: article, isLoading } = useQuery<ArticleData>({
     queryKey: ['article', id],
     queryFn: () => apiFetch(`/articles/${id}`),
     enabled: !!id,
+  });
+
+  const { data: serverSeoAnalysis } = useQuery<SeoAnalysis>({
+    queryKey: ['article-seo', id],
+    queryFn: () => apiFetch(`/seo/articles/${id}`),
+    enabled: !!id && hasPermission('article.read'),
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -206,8 +223,19 @@ export default function ArticleEditorPage() {
         data: MediaItem[];
         meta: { page: number; limit: number; total: number; totalPages: number };
       }>(`/media?page=${mediaPage}&limit=12${mediaSearch ? `&search=${encodeURIComponent(mediaSearch)}` : ''}`),
-    enabled: showMediaBrowser,
+    enabled: mediaBrowserMode !== null,
   });
+
+  /** Featured-image mode sets the article's image; body mode inserts into the TipTap content instead. */
+  const applyMediaSelection = (media: MediaItem) => {
+    if (mediaBrowserMode === 'body') {
+      richTextEditorRef.current?.insertImage(media.publicUrl, media.altText ?? undefined);
+    } else {
+      setUploadedMedia(media);
+      setFeaturedImageId(media.id);
+    }
+    setMediaBrowserMode(null);
+  };
 
   const uploadMediaMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -216,10 +244,8 @@ export default function ArticleEditorPage() {
       return apiFetch<MediaItem>('/media', { method: 'POST', body: formData });
     },
     onSuccess: (media) => {
-      setUploadedMedia(media);
-      setFeaturedImageId(media.id);
       queryClient.invalidateQueries({ queryKey: ['media'] });
-      setShowMediaBrowser(false);
+      applyMediaSelection(media);
     },
   });
 
@@ -230,6 +256,10 @@ export default function ArticleEditorPage() {
     : null;
 
   const handleSave = async () => {
+    const errors = validateArticleDraft({ title });
+    setValidationErrors(errors);
+    if (errors.length > 0) return;
+
     const data: Record<string, unknown> = {
       title,
       slug: slug || undefined,
@@ -275,7 +305,7 @@ export default function ArticleEditorPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/articles')} className="text-gray-500 hover:text-gray-700">
             <ArrowLeft className="h-5 w-5" />
@@ -284,7 +314,7 @@ export default function ArticleEditorPage() {
             {id ? 'Edit Article' : 'New Article'}
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => handleSave()}
             disabled={createMutation.isPending || updateMutation.isPending}
@@ -293,7 +323,7 @@ export default function ArticleEditorPage() {
             <Save className="h-4 w-4" />
             Save Draft
           </button>
-          {id && article?.status === 'DRAFT' && (
+          {id && article?.status === 'DRAFT' && article?.authorId === currentUserId && (
             <button
               onClick={() => workflowMutation.mutate('submit-review')}
               disabled={workflowMutation.isPending}
@@ -326,22 +356,40 @@ export default function ArticleEditorPage() {
         </div>
       </div>
 
+      {validationErrors.length > 0 && (
+        <div role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <ul className="list-disc space-y-0.5 pl-4">
+            {validationErrors.map((message) => <li key={message}>{message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {(createMutation.isError || updateMutation.isError || workflowMutation.isError) && (
+        <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {getApiErrorMessage(createMutation.error ?? updateMutation.error ?? workflowMutation.error, 'Something went wrong. Please try again.')}
+        </p>
+      )}
+
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Title</label>
+            <label htmlFor="article-title" className="block text-sm font-medium text-gray-700">Title</label>
             <input
+              id="article-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleAutoSlug}
+              aria-required="true"
+              aria-invalid={validationErrors.length > 0}
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
               placeholder="Article title"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Slug</label>
+            <label htmlFor="article-slug" className="block text-sm font-medium text-gray-700">Slug</label>
             <input
+              id="article-slug"
               type="text"
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
@@ -350,8 +398,9 @@ export default function ArticleEditorPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Excerpt</label>
+            <label htmlFor="article-excerpt" className="block text-sm font-medium text-gray-700">Excerpt</label>
             <textarea
+              id="article-excerpt"
               value={excerpt}
               onChange={(e) => setExcerpt(e.target.value)}
               rows={3}
@@ -360,21 +409,42 @@ export default function ArticleEditorPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Content</label>
+            <span className="block text-sm font-medium text-gray-700">Content</span>
             <div className="mt-1">
-              <RichTextEditor content={content} onChange={setContent} placeholder="Write your article..." />
+              <RichTextEditor
+                ref={richTextEditorRef}
+                content={content}
+                onChange={setContent}
+                placeholder="Write your article..."
+                onRequestImage={() => setMediaBrowserMode('body')}
+              />
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <h3 className="text-sm font-medium text-gray-900">SEO</h3>
+            <h3 className="text-sm font-medium text-gray-900">Search metadata</h3>
             <div className="mt-4 space-y-3">
-              <input value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} maxLength={500} placeholder="SEO title (optional)" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} maxLength={2000} rows={2} placeholder="SEO description (optional)" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              <input value={seoKeywords} onChange={(e) => setSeoKeywords(e.target.value)} maxLength={1000} placeholder="Keywords, comma separated" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-              <input value={canonicalUrl} onChange={(e) => setCanonicalUrl(e.target.value)} maxLength={2000} placeholder="Canonical URL (optional)" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor="seo-title" className="block text-xs font-medium text-gray-600">SEO title</label>
+              <input id="seo-title" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} maxLength={500} placeholder="SEO title (optional)" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor="seo-description" className="block text-xs font-medium text-gray-600">Meta description</label>
+              <textarea id="seo-description" value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} maxLength={2000} rows={2} placeholder="SEO description (optional)" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor="seo-keywords" className="block text-xs font-medium text-gray-600">Focus phrase / supporting keywords</label>
+              <input id="seo-keywords" value={seoKeywords} onChange={(e) => setSeoKeywords(e.target.value)} maxLength={1000} placeholder="Primary phrase first, then optional supporting terms" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor="canonical-url" className="block text-xs font-medium text-gray-600">Canonical override</label>
+              <input id="canonical-url" value={canonicalUrl} onChange={(e) => setCanonicalUrl(e.target.value)} maxLength={2000} placeholder="Leave blank to use the public article URL" className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
               <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={noIndex} onChange={(e) => setNoIndex(e.target.checked)} /> Do not index this article</label>
             </div>
           </div>
+          <SeoIntelligencePanel
+            title={title} slug={slug} excerpt={excerpt} content={content} seoTitle={seoTitle}
+            seoDescription={seoDescription} focusKeyword={seoKeywords} canonicalUrl={canonicalUrl}
+            noIndex={noIndex} status={article?.status || 'DRAFT'} featuredImageUrl={selectedMedia?.publicUrl}
+            featuredImageAlt={selectedMedia?.altText} category={!!categoryId} location={!!locationId}
+            author={!!currentUserId} publishedAt={article?.publishedAt} updatedAt={article?.updatedAt}
+            translationsCount={translations?.length || 0} hasHreflang hasOpenGraph hasTwitterCard
+            hasArticleSchema hasBreadcrumbSchema hasPublisher serverAnalysis={serverSeoAnalysis}
+            onUseTitle={() => setSeoTitle(title)} onUseExcerpt={() => setSeoDescription(excerpt)}
+            onGenerateSlug={() => setSlug(title.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, ''))}
+          />
         </div>
 
         <div className="space-y-6">
@@ -414,7 +484,7 @@ export default function ArticleEditorPage() {
                 </div>
               ) : (
                 <button
-                  onClick={() => setShowMediaBrowser(true)}
+                  onClick={() => setMediaBrowserMode('featured')}
                   className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 p-4 text-sm text-gray-500 hover:border-primary-500 hover:text-primary-600"
                 >
                   <ImageIcon className="h-5 w-5" />
@@ -607,12 +677,14 @@ export default function ArticleEditorPage() {
         </div>
       </div>
 
-      {showMediaBrowser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      {mediaBrowserMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-labelledby="media-browser-title">
           <div className="w-full max-w-3xl rounded-lg bg-white p-6 shadow-xl" style={{ maxHeight: '80vh', overflow: 'auto' }}>
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Select Featured Image</h2>
-              <button onClick={() => setShowMediaBrowser(false)} className="text-gray-400 hover:text-gray-600">
+              <h2 id="media-browser-title" className="text-lg font-semibold text-gray-900">
+                {mediaBrowserMode === 'body' ? 'Insert Image into Article' : 'Select Featured Image'}
+              </h2>
+              <button onClick={() => setMediaBrowserMode(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -663,10 +735,8 @@ export default function ArticleEditorPage() {
                 {mediaData.data.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => {
-                      setFeaturedImageId(item.id);
-                      setShowMediaBrowser(false);
-                    }}
+                    onClick={() => applyMediaSelection(item)}
+                    aria-label={`Select ${item.originalFilename}`}
                     className="aspect-square overflow-hidden rounded-md border-2 border-transparent hover:border-primary-500 transition-colors"
                   >
                     <img

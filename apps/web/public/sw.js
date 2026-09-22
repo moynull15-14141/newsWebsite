@@ -1,5 +1,5 @@
 const CACHE_NAME = 'bd-news-static-v2';
-const STATIC_ASSETS = ['/manifest.webmanifest', '/robots.txt', '/icon.svg', '/offline.html'];
+const STATIC_ASSETS = ['/manifest.webmanifest', '/icon.svg', '/offline.html'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));

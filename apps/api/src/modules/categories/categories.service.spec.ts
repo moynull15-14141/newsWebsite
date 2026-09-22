@@ -40,6 +40,29 @@ describe('CategoriesService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('findBySlug', () => {
+    it('returns the category with its translations for a real slug (public category metadata)', async () => {
+      const category = {
+        id: 'cat-1',
+        name: 'World',
+        slug: 'world',
+        description: null,
+        parent: null,
+        translations: [{ language: { id: 'lang-bn', code: 'bn' }, name: 'বিশ্ব', slug: 'world', description: 'বিশ্ব সংবাদ' }],
+      };
+      prisma.category.findUnique.mockResolvedValue(category);
+
+      const result = await service.findBySlug('world');
+      expect(result).toEqual(category);
+    });
+
+    it('throws NotFoundException for a slug that is not a real category', async () => {
+      prisma.category.findUnique.mockResolvedValue(null);
+
+      await expect(service.findBySlug('not-a-real-category')).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('create', () => {
     it('should create category if slug is unique', async () => {
       prisma.category.findUnique.mockResolvedValue(null);

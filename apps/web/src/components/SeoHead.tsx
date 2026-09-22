@@ -45,8 +45,13 @@ export default function SeoHead({
   const { code, direction } = useLanguage();
   const fullTitle = title.includes(SITE_NAME) ? title : `${title} | ${SITE_NAME}`;
   const metaDescription = description || DEFAULT_DESCRIPTION;
-  const canonicalUrl = url || (typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : undefined);
+  const canonicalUrl = url
+    ? (url.startsWith('http') ? url : typeof window !== 'undefined' ? `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}` : url)
+    : (typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : undefined);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const socialImage = image
+    ? (image.startsWith('http') ? image : `${origin}${image.startsWith('/') ? '' : '/'}${image}`)
+    : `${origin}${DEFAULT_IMAGE}`;
   const structuredData = jsonLd || {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
@@ -57,7 +62,7 @@ export default function SeoHead({
   };
 
   return (
-    <Helmet htmlAttributes={{ lang: code, dir: direction }}>
+    <Helmet defer={false} htmlAttributes={{ lang: code, dir: direction }}>
       <title>{fullTitle}</title>
       <meta name="description" content={metaDescription} />
       <meta name="robots" content={noIndex ? 'noindex,follow' : 'index,follow'} />
@@ -66,11 +71,11 @@ export default function SeoHead({
         <link key={alt.code} rel="alternate" hrefLang={alt.code} href={alt.url.startsWith('http') ? alt.url : `${origin}${alt.url}`} />
       ))}
       {alternates && alternates.length > 0 && canonicalUrl && (
-        <link rel="alternate" hrefLang="x-default" href={canonicalUrl} />
+        <link rel="alternate" hrefLang="x-default" href={(alternates.find((alt) => alt.code === 'bn') || alternates[0]).url.startsWith('http') ? (alternates.find((alt) => alt.code === 'bn') || alternates[0]).url : `${origin}${(alternates.find((alt) => alt.code === 'bn') || alternates[0]).url}`} />
       )}
       <meta property="og:title" content={fullTitle} />
       <meta property="og:description" content={metaDescription} />
-      <meta property="og:image" content={image || DEFAULT_IMAGE} />
+      <meta property="og:image" content={socialImage} />
       {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
       <meta property="og:type" content={type} />
       <meta property="og:locale" content={code === 'bn' ? 'bn_BD' : 'en_US'} />
@@ -78,7 +83,7 @@ export default function SeoHead({
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content={fullTitle} />
       <meta name="twitter:description" content={metaDescription} />
-      <meta name="twitter:image" content={image || DEFAULT_IMAGE} />
+      <meta name="twitter:image" content={socialImage} />
       <meta name="twitter:label1" content="Published by" />
       <meta name="twitter:data1" content={SITE_NAME} />
       {publishedTime && <meta property="article:published_time" content={publishedTime} />}

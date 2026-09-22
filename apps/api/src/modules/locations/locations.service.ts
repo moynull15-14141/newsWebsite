@@ -112,11 +112,18 @@ export class LocationsService {
     return location;
   }
 
+  /**
+   * `parent` is nested one extra level (grandparent) so a District response carries its Division AND
+   * that Division's own parent (the country) in one call — enough for a real Bangladesh → Division →
+   * District breadcrumb without a second round trip or hardcoding the hierarchy in the frontend.
+   */
   async findBySlug(slug: string, type?: string) {
     const location = await this.prisma.location.findFirst({
       where: { slug, ...(type ? { type: type as any } : {}) },
       include: {
-        parent: true,
+        // Prisma's generated types don't model a 3-level-deep self-relation include cleanly; the shape
+        // itself (parent -> parent, translations at each level) is valid and exercised by the tests.
+        parent: { include: { parent: { include: TRANSLATIONS_INCLUDE }, ...TRANSLATIONS_INCLUDE } } as any,
         children: true,
         ...TRANSLATIONS_INCLUDE,
       },

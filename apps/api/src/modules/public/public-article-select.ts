@@ -13,6 +13,7 @@ export const ARTICLE_SELECT = {
   noIndex: true,
   status: true,
   publishedAt: true,
+  updatedAt: true,
   createdAt: true,
   viewCount: true,
   isBreaking: true,
@@ -23,6 +24,6 @@ export const ARTICLE_SELECT = {
   category: { select: { id: true, name: true, slug: true } },
   location: { select: { id: true, name: true, slug: true, type: true } },
   articleTags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
-  media: { select: { id: true, publicUrl: true } },
+  media: { select: { id: true, publicUrl: true, altText: true } },
   _count: { select: { comments: { where: { status: CommentStatus.APPROVED } } } },
 };

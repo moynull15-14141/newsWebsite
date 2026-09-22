@@ -1,100 +1,97 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch, withLang } from '@/lib/api';
-import ArticleList from '@/components/ArticleList';
+import { apiFetch, isNotFoundError, withLang } from '@/lib/api';
 import SeoHead from '@/components/SeoHead';
+import { Skeleton } from '@/components/Skeleton';
+import { Container } from '@/components/Container';
+import Breadcrumbs from '@/components/Breadcrumbs';
+import DiscoveryFeed from '@/components/DiscoveryFeed';
+import { type EditorialArticle } from '@/components/editorial';
 import { publicArticleRoutes } from '@/lib/public-routes';
+import NotFoundPage from './NotFoundPage';
 import { useLanguage } from '@/lib/i18n';
 
-interface Article {
+interface Meta { page: number; limit: number; total: number; totalPages: number }
+interface ArticlesResponse { data: EditorialArticle[]; meta: Meta }
+
+/** Deliberately just id + name — see PublicService.getAuthorProfile: there is no public bio/avatar field. */
+interface AuthorProfile {
   id: string;
-  title: string;
-  slug: string;
-  excerpt?: string;
-  publishedAt?: string;
-  author?: { id: string; name: string };
-  category?: { id: string; name: string; slug: string };
-  imageUrl?: string;
-  featuredImageUrl?: string;
-}
-
-interface Meta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-interface ApiResponse {
-  data: Article[];
-  meta: Meta;
+  name: string;
 }
 
 export default function AuthorPage() {
   const { id } = useParams<{ id: string }>();
   const [page, setPage] = useState(1);
-  const { code, t } = useLanguage();
+  const { code, t, pathFor } = useLanguage();
 
-  const { data, isLoading, error } = useQuery<ApiResponse>({
-    queryKey: ['author', id, page, code],
-    queryFn: () => apiFetch(withLang(`${publicArticleRoutes.author(id || '')}?page=${page}&limit=20`, code)),
+  // Real author record (GET /public/authors/:id) — never inferred from the first article in the list,
+  // which would wrongly fall back to a placeholder name for an author with zero published articles.
+  // This is also the one query that tells us whether the author id genuinely exists (404 if not).
+  const { data: author, isLoading: authorLoading, error: authorError } = useQuery<AuthorProfile>({
+    queryKey: ['author-detail', id],
+    queryFn: () => apiFetch(`/public/authors/${encodeURIComponent(id || '')}`),
     enabled: !!id,
+    retry: false,
   });
 
-  const authorName = data?.data?.[0]?.author?.name || t('author.defaultName');
+  const { data, isLoading: articlesLoading, error: articlesError } = useQuery<ArticlesResponse>({
+    queryKey: ['author', id, page, code],
+    queryFn: () => apiFetch(withLang(`${publicArticleRoutes.author(id || '')}?page=${page}&limit=20`, code)),
+    enabled: !!id && !!author, // wait for the author to be confirmed real before listing their articles
+  });
 
+  if (authorError && isNotFoundError(authorError)) return <NotFoundPage />;
+
+  const isLoading = authorLoading || (!!author && articlesLoading);
   if (isLoading) {
     return (
-      <div className="container-wide py-12">
-        <div className="animate-pulse space-y-6">
-          <div className="h-8 w-48 rounded bg-gray-200" />
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex gap-4">
-              <div className="h-32 w-40 flex-shrink-0 rounded bg-gray-200" />
-              <div className="flex-1 space-y-3">
-                <div className="h-4 w-3/4 rounded bg-gray-200" />
-                <div className="h-3 w-1/2 rounded bg-gray-200" />
-              </div>
-            </div>
-          ))}
+      <Container className="py-8">
+        <Skeleton className="mb-6 h-10 w-48" />
+        <div className="grid gap-8 md:grid-cols-[2fr_1fr]">
+          <Skeleton className="aspect-video w-full" />
+          <div className="space-y-5"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>
         </div>
-      </div>
+      </Container>
     );
   }
 
-  if (error) {
-    return (
-      <div className="container-wide py-12 text-center">
-        <h2 className="text-xl font-semibold text-gray-900">{t('common.somethingWrong')}</h2>
-        <p className="mt-2 text-gray-600">{t('common.unableToLoad')}</p>
-      </div>
-    );
+  if (authorError || articlesError) {
+    return <Container className="py-16 text-center"><h1 className="text-xl font-bold">{t('common.somethingWrong')}</h1><p className="mt-2 text-neutral-600">{t('common.unableToLoad')}</p></Container>;
   }
+
+  if (!author) return <NotFoundPage />;
 
   const articles = data?.data || [];
-  const meta = data?.meta;
 
-  return (
-    <>
-      <SeoHead
-        title={`${authorName} - BD News`}
-        description={`Articles by ${authorName}`}
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'ProfilePage',
+    name: author.name,
+    inLanguage: code,
+  };
+
+  return <>
+    <SeoHead
+      title={`${author.name} - BD News`}
+      description={t('common.newsFrom', { name: author.name })}
+      url={typeof window !== 'undefined' ? `${window.location.origin}${pathFor(`/author/${id}`, code)}` : undefined}
+      jsonLd={jsonLd}
+    />
+    <Container className="py-6 lg:py-8">
+      <Breadcrumbs items={[{ label: author.name }]} />
+      <header className="mb-6 border-b-2 border-neutral-900 pb-3">
+        <h1 className="text-3xl font-bold text-neutral-950 sm:text-4xl">{author.name}</h1>
+      </header>
+      <DiscoveryFeed
+        articles={articles}
+        meta={data?.meta}
+        onPageChange={setPage}
+        title={author.name}
+        emptyMessage={t('common.noArticlesFound')}
+        feedHeadingId="author-latest"
       />
-      <div className="container-wide py-8 lg:py-12">
-        <h1 className="mb-2 text-3xl font-bold text-gray-900">
-          {authorName}
-        </h1>
-        <p className="mb-8 text-sm text-gray-500">
-          {meta ? `${meta.total} ${t('author.articles')}` : t('common.loading')}
-        </p>
-        <ArticleList
-          articles={articles}
-          showPagination
-          meta={meta}
-          onPageChange={setPage}
-        />
-      </div>
-    </>
-  );
+    </Container>
+  </>;
 }

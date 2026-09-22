@@ -10,6 +10,7 @@ import { loadConfiguredSections, serializeHomepageSections } from '../homepage/h
 import { resolveSectionArticles } from '../homepage/homepage.section-resolver';
 import { ARTICLE_SELECT } from './public-article-select';
 import { articleLanguageWhere } from '../../common/i18n/article-language';
+import { loadLocationDescendants } from '../../common/location/location-descendants';
 
 const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_SELECT,
@@ -107,12 +108,27 @@ export class PublicService {
   }
 
   async getArticlesByTag(tagSlug: string, query: PublicArticleQueryDto) {
-    const tag = await this.prisma.tag.findUnique({ where: { slug: tagSlug } });
+    const tag = await this.prisma.tag.findFirst({ where: { slug: tagSlug, status: 'ACTIVE' } });
     if (!tag) throw new NotFoundException('Tag not found');
 
     return this.getArticles(query, {
       articleTags: { some: { tagId: tag.id } },
     });
+  }
+
+  /** Minimal taxonomy metadata for public discovery pages. */
+  async getTag(tagSlug: string) {
+    const tag = await this.prisma.tag.findFirst({
+      where: { slug: tagSlug, status: 'ACTIVE' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        translations: { select: { name: true, slug: true, language: { select: { id: true, code: true } } } },
+      },
+    });
+    if (!tag) throw new NotFoundException('Tag not found');
+    return tag;
   }
 
   async getArticlesByAuthor(authorId: string, query: PublicArticleQueryDto) {
@@ -122,19 +138,75 @@ export class PublicService {
     return this.getArticles(query, { authorId });
   }
 
+  /**
+   * Public author byline page metadata. Deliberately the same minimal shape as `ARTICLE_SELECT.author`
+   * (id + name) — there is no bio/avatar field on User today (that would be a genuine schema change,
+   * out of scope here), and nothing else on the User row is safe to expose publicly (email, passwordHash,
+   * status, sessions, etc). Never derive this from the first article in a list: an author with zero
+   * published articles still has a real name and a real page.
+   */
+  async getAuthorProfile(authorId: string) {
+    const author = await this.prisma.user.findUnique({ where: { id: authorId }, select: { id: true, name: true } });
+    if (!author) throw new NotFoundException('Author not found');
+    return author;
+  }
+
+  /**
+   * Includes every descendant in the location's subtree, not just direct children — a Bangladesh
+   * (COUNTRY) page must show district-tagged articles too, which are two levels down, not one.
+   */
   async getArticlesByLocation(locationSlug: string, query: PublicArticleQueryDto, locationType?: string) {
-    const location = await this.prisma.location.findFirst({ where: { slug: locationSlug, ...(locationType ? { type: locationType as any } : {}) } });
+    const location = await this.prisma.location.findFirst({ where: { slug: locationSlug, status: 'ACTIVE', ...(locationType ? { type: locationType as any } : {}) } });
     if (!location) throw new NotFoundException('Location not found');
 
-    const childLocations = await this.prisma.location.findMany({
-      where: { parentId: location.id },
-      select: { id: true },
-    });
-    const locationIds = [location.id, ...childLocations.map((l) => l.id)];
+    const locationIds = await loadLocationDescendants(this.prisma, [location.id]);
 
     return this.getArticles(query, {
       locationId: { in: locationIds },
     });
+  }
+
+  /** Minimal active location list used by the public division/district browser. */
+  async getLocations() {
+    return this.prisma.location.findMany({
+      where: { status: 'ACTIVE' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        type: true,
+        parentId: true,
+        translations: { select: { name: true, language: { select: { id: true, code: true } } } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /** Minimal public location metadata, including only the ancestry needed for breadcrumbs. */
+  async getLocation(locationSlug: string, locationType?: string) {
+    const translationSelect = { select: { name: true, language: { select: { id: true, code: true } } } } as const;
+    const location = await this.prisma.location.findFirst({
+      where: { slug: locationSlug, status: 'ACTIVE', ...(locationType ? { type: locationType as any } : {}) },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        type: true,
+        translations: translationSelect,
+        parent: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            type: true,
+            translations: translationSelect,
+            parent: { select: { id: true, name: true, slug: true, type: true, translations: translationSelect } },
+          },
+        },
+      },
+    });
+    if (!location) throw new NotFoundException('Location not found');
+    return location;
   }
 
   async search(query: PublicArticleQueryDto) {

@@ -1,56 +1,122 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch, withLang } from '@/lib/api';
-import ArticleList from '@/components/ArticleList';
+import { apiFetch, isNotFoundError, withLang } from '@/lib/api';
+import { localizedField } from '@/lib/localize';
 import SeoHead from '@/components/SeoHead';
 import AdSlot from '@/components/AdSlot';
 import { Skeleton } from '@/components/Skeleton';
 import { Container } from '@/components/Container';
-import { LeadStory, StoryRow, type EditorialArticle } from '@/components/editorial';
+import Breadcrumbs from '@/components/Breadcrumbs';
+import DiscoveryFeed from '@/components/DiscoveryFeed';
+import { type EditorialArticle } from '@/components/editorial';
+import NotFoundPage from './NotFoundPage';
 import { useLanguage } from '@/lib/i18n';
 
 interface Meta { page: number; limit: number; total: number; totalPages: number }
-interface ApiResponse { data: EditorialArticle[]; meta: Meta }
+interface ArticlesResponse { data: EditorialArticle[]; meta: Meta }
 
-function categoryTitle(slug?: string) {
-  return slug?.replace(/-/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'News';
+interface CategoryTranslation {
+  language?: { id: string; code: string } | null;
+  name: string;
+  slug: string;
+  description?: string | null;
+}
+
+interface CategoryDetail {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  parent?: { id: string; name: string; slug: string } | null;
+  translations?: CategoryTranslation[];
 }
 
 export default function CategoryPage() {
   const { slug } = useParams<{ slug: string }>();
   const [page, setPage] = useState(1);
-  const { code, t } = useLanguage();
-  const { data, isLoading, error } = useQuery<ApiResponse>({
+  const { code, t, pathFor } = useLanguage();
+
+  // Real taxonomy data (GET /categories/:slug is already public) — never a slug-derived guess, and this
+  // is also the one query that tells us whether the category genuinely exists (404 if not).
+  const { data: category, isLoading: categoryLoading, error: categoryError } = useQuery<CategoryDetail>({
+    queryKey: ['category-detail', slug],
+    queryFn: () => apiFetch(`/categories/${slug}`),
+    enabled: !!slug,
+    retry: false,
+  });
+
+  const { data, isLoading: articlesLoading, error: articlesError } = useQuery<ArticlesResponse>({
     queryKey: ['category', slug, page, code],
     queryFn: () => apiFetch(withLang(`/public/categories/${slug}/articles?page=${page}&limit=20`, code)),
-    enabled: !!slug,
+    enabled: !!slug && !!category, // wait for the category to be confirmed real before listing its articles
   });
-  const title = categoryTitle(slug);
 
-  if (isLoading) return <Container className="py-8"><Skeleton className="mb-6 h-10 w-48" /><div className="grid gap-8 md:grid-cols-[2fr_1fr]"><Skeleton className="aspect-video w-full" /><div className="space-y-5"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div></div></Container>;
-  if (error) return <Container className="py-16 text-center"><h1 className="text-xl font-bold">{t('common.somethingWrong')}</h1><p className="mt-2 text-neutral-600">{t('common.unableToLoad')}</p></Container>;
+  if (categoryError && isNotFoundError(categoryError)) return <NotFoundPage />;
+
+  const isLoading = categoryLoading || (!!category && articlesLoading);
+  if (isLoading) {
+    return (
+      <Container className="py-8">
+        <Skeleton className="mb-6 h-10 w-48" />
+        <div className="grid gap-8 md:grid-cols-[2fr_1fr]">
+          <Skeleton className="aspect-video w-full" />
+          <div className="space-y-5"><Skeleton className="h-32 w-full" /><Skeleton className="h-32 w-full" /></div>
+        </div>
+      </Container>
+    );
+  }
+
+  if (categoryError || articlesError) {
+    return <Container className="py-16 text-center"><h1 className="text-xl font-bold">{t('common.somethingWrong')}</h1><p className="mt-2 text-neutral-600">{t('common.unableToLoad')}</p></Container>;
+  }
+
+  if (!category) return <NotFoundPage />;
+
+  const title = localizedField(category.name, category.translations, code, 'name') || category.name;
+  const description = localizedField(category.description, category.translations, code, 'description');
+  const alternates = [
+    { code: 'bn', url: pathFor(`/category/${category.translations?.find((item) => item.language?.code === 'bn')?.slug || category.slug}`, 'bn') },
+    ...((category.translations || []).filter((item) => item.language?.code && item.language.code !== 'bn').map((item) => ({ code: item.language!.code, url: pathFor(`/category/${item.slug}`, item.language!.code) }))),
+  ];
 
   const articles = data?.data || [];
-  const [lead, ...rest] = articles;
-  const supporting = rest.slice(0, 2);
-  const feed = rest.slice(2);
+
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: title,
+    description: description || undefined,
+    inLanguage: code,
+  };
 
   return <>
-    <SeoHead title={`${title} - BD News`} description={`Latest ${title} news and articles from BD News`} />
+    <SeoHead
+      title={`${title} - BD News`}
+      description={description || t('common.newsFrom', { name: title })}
+      url={typeof window !== 'undefined' ? `${window.location.origin}${pathFor(`/category/${slug}`, code)}` : undefined}
+      section={title}
+      jsonLd={jsonLd}
+      alternates={alternates}
+    />
     <Container className="py-6 lg:py-8">
-      <header className="mb-6 border-b-2 border-neutral-900 pb-3"><h1 className="text-3xl font-bold text-neutral-950 sm:text-4xl">{title}</h1></header>
-      <AdSlot slot="CATEGORY_TOP" pageType="category" />
-      {lead ? <>
-        <section aria-label={`${title} top stories`} className="grid gap-7 border-b border-neutral-300 pb-8 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] md:divide-x md:divide-neutral-300">
-          <LeadStory article={lead} />
-          <div className="md:pl-7">{supporting.map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
-        </section>
-        {feed.length > 0 && <section aria-labelledby="category-latest" className="mt-9 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <div><h2 id="category-latest" className="mb-5 border-y border-neutral-300 py-3 text-xl font-bold">{t('common.latestIn', { name: title })}</h2><ArticleList articles={feed} showPagination meta={data?.meta} onPageChange={setPage} /></div>
-          <aside className="hidden border-l border-neutral-300 pl-8 lg:block" aria-label="Category archive"><p className="border-t-4 border-primary-600 py-3 text-lg font-bold">{t('common.browse')} {title}</p><p className="text-sm leading-6 text-neutral-600">{t('common.page')} {data?.meta.page} {t('common.of')} {data?.meta.totalPages || 1}<br />{data?.meta.total || 0} {t('common.publishedStories')}</p></aside>
-        </section>}
-      </> : <p className="py-16 text-center text-neutral-500">{t('common.noArticlesFound')}</p>}
+      <Breadcrumbs items={[
+        ...(category.parent ? [{ label: category.parent.name, href: `/category/${category.parent.slug}` }] : []),
+        { label: title },
+      ]} />
+      <header className="mb-6 border-b-2 border-neutral-900 pb-3">
+        <h1 className="text-3xl font-bold text-neutral-950 sm:text-4xl">{title}</h1>
+        {description && <p className="mt-2 max-w-2xl text-neutral-600">{description}</p>}
+      </header>
+      <AdSlot slot="CATEGORY_TOP" pageType="category" categoryId={category.id} />
+      <DiscoveryFeed
+        articles={articles}
+        meta={data?.meta}
+        onPageChange={setPage}
+        title={title}
+        emptyMessage={t('common.noArticlesFound')}
+        feedHeadingId="category-latest"
+      />
     </Container>
   </>;
 }
