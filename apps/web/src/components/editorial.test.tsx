@@ -1,8 +1,24 @@
-import { renderToStaticMarkup } from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderToStaticMarkup as renderToStaticMarkupBase } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { BriefList, LeadStory, RankedList, SectionBody, StoryRow } from './editorial';
+import { LanguageProvider } from '@/lib/i18n';
 
-vi.mock('react-router-dom', () => ({ Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => <a href={to} {...props}>{children}</a> }));
+vi.mock('react-router-dom', () => ({
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => <a href={to} {...props}>{children}</a>,
+  useLocation: () => ({ pathname: '/', search: '' }),
+}));
+
+/** Every editorial component reads the active language via context, so every render needs both providers. */
+function renderToStaticMarkup(node: React.ReactElement): string {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderToStaticMarkupBase(
+    <QueryClientProvider client={client}>
+      <LanguageProvider>{node}</LanguageProvider>
+    </QueryClientProvider>,
+  );
+}
+
 const article = { id: 'one', slug: 'one', title: 'Editorial headline', excerpt: 'Summary', media: { id: 'media', publicUrl: '/story.jpg' } };
 
 describe('editorial story presentations', () => {

@@ -3,6 +3,8 @@ import { Play, ArrowRight } from 'lucide-react';
 import { ImagePlaceholder } from './ImagePlaceholder';
 import ArticleCard, { type ArticleCardVariant } from './ArticleCard';
 import { contentLanguage } from '@/lib/content-language';
+import { useLanguage } from '@/lib/i18n';
+import { formatLocalizedShortDate } from '@/lib/format-date';
 
 export interface EditorialArticle {
   id: string;
@@ -22,11 +24,6 @@ function articleImage(article: EditorialArticle) {
   return article.featuredImageUrl || article.imageUrl || article.media?.publicUrl;
 }
 
-function formatStoryDate(value?: string | null) {
-  if (!value) return '';
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(new Date(value));
-}
-
 function StoryImage({ article, className, priority = false }: { article: EditorialArticle; className: string; priority?: boolean }) {
   const src = articleImage(article);
   return src ? (
@@ -37,20 +34,27 @@ function StoryImage({ article, className, priority = false }: { article: Editori
 }
 
 function StoryMeta({ article }: { article: EditorialArticle }) {
+  const { code } = useLanguage();
   if (!article.author && !article.publishedAt) return null;
   return (
     <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
       {article.author?.name && <span>{article.author.name}</span>}
       {article.author && article.publishedAt && <span aria-hidden="true">&middot;</span>}
-      {article.publishedAt && <time dateTime={article.publishedAt}>{formatStoryDate(article.publishedAt)}</time>}
+      {article.publishedAt && <time dateTime={article.publishedAt}>{formatLocalizedShortDate(article.publishedAt, code)}</time>}
     </p>
   );
 }
 
+function useArticleHref(slug: string) {
+  const { code, pathFor } = useLanguage();
+  return pathFor(`/article/${slug}`, code);
+}
+
 export function LeadStory({ article }: { article: EditorialArticle }) {
+  const href = useArticleHref(article.slug);
   return (
     <article className="min-w-0">
-      <Link to={`/article/${article.slug}`} className="group block">
+      <Link to={href} className="group block">
         <StoryImage article={article} priority className="aspect-video w-full object-cover" />
         <div className="pt-4">
           {article.category && <span className="text-xs font-bold uppercase text-primary-600">{article.category.name}</span>}
@@ -66,9 +70,10 @@ export function LeadStory({ article }: { article: EditorialArticle }) {
 }
 
 export function StandardStory({ article, media = true }: { article: EditorialArticle; media?: boolean }) {
+  const href = useArticleHref(article.slug);
   return (
     <article className="min-w-0">
-      <Link to={`/article/${article.slug}`} className="group block">
+      <Link to={href} className="group block">
         {media && <StoryImage article={article} className="aspect-video w-full object-cover" />}
         <h3 lang={contentLanguage(article.title)} className={`${media ? 'mt-3' : ''} text-lg font-bold leading-[1.4] text-neutral-900 group-hover:text-primary-600`}>
           {article.title}
@@ -80,9 +85,10 @@ export function StandardStory({ article, media = true }: { article: EditorialArt
 }
 
 export function StoryRow({ article, compact = false }: { article: EditorialArticle; compact?: boolean }) {
+  const href = useArticleHref(article.slug);
   return (
     <article className="min-w-0 border-b border-neutral-200 py-4 first:pt-0 last:border-b-0 last:pb-0">
-      <Link to={`/article/${article.slug}`} className="group grid grid-cols-[minmax(0,1fr)_6.5rem] gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+      <Link to={href} className="group grid grid-cols-[minmax(0,1fr)_6.5rem] gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
         <div className="min-w-0">
           {article.category && !compact && <span className="text-xs font-semibold text-primary-600">{article.category.name}</span>}
           <h3 lang={contentLanguage(article.title)} className={`${compact ? 'text-base' : 'text-lg'} font-bold leading-[1.4] text-neutral-900 group-hover:text-primary-600`}>{article.title}</h3>
@@ -96,6 +102,7 @@ export function StoryRow({ article, compact = false }: { article: EditorialArtic
 }
 
 export function BriefList({ title, articles }: { title: string; articles: EditorialArticle[] }) {
+  const { code, pathFor } = useLanguage();
   if (!articles.length) return null;
   return (
     <aside aria-label={title} className="min-w-0">
@@ -103,9 +110,9 @@ export function BriefList({ title, articles }: { title: string; articles: Editor
       <div>
         {articles.map((article) => (
           <article key={article.id} className="border-t border-neutral-200 py-3">
-            <Link to={`/article/${article.slug}`} className="group block">
+            <Link to={pathFor(`/article/${article.slug}`, code)} className="group block">
               <h3 lang={contentLanguage(article.title)} className="text-[0.95rem] font-semibold leading-[1.45] text-neutral-900 group-hover:text-primary-600">{article.title}</h3>
-              {article.publishedAt && <time className="mt-1 block text-xs text-neutral-500" dateTime={article.publishedAt}>{formatStoryDate(article.publishedAt)}</time>}
+              {article.publishedAt && <time className="mt-1 block text-xs text-neutral-500" dateTime={article.publishedAt}>{formatLocalizedShortDate(article.publishedAt, code)}</time>}
             </Link>
           </article>
         ))}
@@ -115,6 +122,7 @@ export function BriefList({ title, articles }: { title: string; articles: Editor
 }
 
 export function RankedList({ title, articles }: { title: string; articles: EditorialArticle[] }) {
+  const { code, pathFor } = useLanguage();
   if (!articles.length) return null;
   return (
     <aside aria-label={title} className="border-t-4 border-primary-600">
@@ -123,7 +131,7 @@ export function RankedList({ title, articles }: { title: string; articles: Edito
         {articles.map((article, index) => (
           <li key={article.id} className="grid grid-cols-[2.25rem_1fr] gap-3 border-b border-neutral-200 py-4 last:border-b-0">
             <span className="text-2xl font-bold leading-none text-neutral-300" aria-hidden="true">{index + 1}</span>
-            <Link lang={contentLanguage(article.title)} to={`/article/${article.slug}`} className="text-sm font-bold leading-[1.45] text-neutral-900 hover:text-primary-600">{article.title}</Link>
+            <Link lang={contentLanguage(article.title)} to={pathFor(`/article/${article.slug}`, code)} className="text-sm font-bold leading-[1.45] text-neutral-900 hover:text-primary-600">{article.title}</Link>
           </li>
         ))}
       </ol>
@@ -132,9 +140,10 @@ export function RankedList({ title, articles }: { title: string; articles: Edito
 }
 
 export function MediaStory({ article }: { article: EditorialArticle }) {
+  const href = useArticleHref(article.slug);
   return (
     <article className="min-w-0 bg-neutral-900 text-white">
-      <Link to={`/article/${article.slug}`} className="group block">
+      <Link to={href} className="group block">
         <div className="relative">
           <StoryImage article={article} className="aspect-video w-full object-cover opacity-90" />
           <span className="absolute bottom-3 left-3 grid h-10 w-10 place-items-center rounded-full bg-white text-neutral-950" aria-hidden="true"><Play className="h-5 w-5 fill-current" /></span>

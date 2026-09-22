@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, withLang } from '@/lib/api';
 import ArticleList from '@/components/ArticleList';
 import SeoHead from '@/components/SeoHead';
+import { useLanguage } from '@/lib/i18n';
 
 interface Article {
   id: string;
@@ -44,6 +45,7 @@ interface Location {
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { code, t } = useLanguage();
   const initialQuery = searchParams.get('q') || '';
   const [inputValue, setInputValue] = useState(initialQuery);
   const [page, setPage] = useState(1);
@@ -55,17 +57,17 @@ export default function SearchPage() {
   const query = searchParams.get('q') || '';
 
   const { data: categories } = useQuery<Category[]>({
-    queryKey: ['categories'],
-    queryFn: () => apiFetch('/categories'),
+    queryKey: ['categories', code],
+    queryFn: () => apiFetch(withLang('/categories', code)),
   });
 
   const { data: locations } = useQuery<Location[]>({
-    queryKey: ['locations'],
-    queryFn: () => apiFetch('/locations'),
+    queryKey: ['locations', code],
+    queryFn: () => apiFetch(withLang('/locations', code)),
   });
 
   const { data, isLoading } = useQuery<ApiResponse>({
-    queryKey: ['search', query, page, category, location, dateFrom, dateTo],
+    queryKey: ['search', query, page, category, location, dateFrom, dateTo, code],
     queryFn: () => {
       const params = new URLSearchParams();
       if (query) params.set('q', query);
@@ -78,7 +80,7 @@ export default function SearchPage() {
       }
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
-      return apiFetch(`/public/search?${params.toString()}`);
+      return apiFetch(withLang(`/public/search?${params.toString()}`, code));
     },
     enabled: true,
   });
@@ -104,12 +106,12 @@ export default function SearchPage() {
   return (
     <>
       <SeoHead
-        title={query ? `Search: ${query}` : 'Search'}
+        title={query ? `Search: ${query}` : t('search.title')}
         description={`Search results for ${query}`}
         noIndex
       />
       <div className="container-wide py-8 lg:py-12">
-        <h1 className="mb-6 text-3xl font-bold text-gray-900">Search</h1>
+        <h1 className="mb-6 text-3xl font-bold text-gray-900">{t('search.title')}</h1>
 
         <form onSubmit={handleSearch} className="mb-8 space-y-4">
           <div className="flex gap-2">
@@ -117,14 +119,14 @@ export default function SearchPage() {
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Search articles..."
+              placeholder={t('search.placeholder')}
               className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
             <button
               type="submit"
               className="rounded-lg bg-primary-500 px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-600"
             >
-              Search
+              {t('search.button')}
             </button>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -133,7 +135,7 @@ export default function SearchPage() {
               onChange={(e) => setCategory(e.target.value)}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             >
-              <option value="">All Categories</option>
+              <option value="">{t('search.allCategories')}</option>
               {categories?.map((cat) => (
                 <option key={cat.id} value={cat.slug}>{cat.name}</option>
               ))}
@@ -143,7 +145,7 @@ export default function SearchPage() {
               onChange={(e) => setLocation(e.target.value)}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             >
-              <option value="">All Locations</option>
+              <option value="">{t('search.allLocations')}</option>
               {divisions.map((div) => (
                 <option key={div.id} value={`DIVISION:${div.slug}`}>{div.name}</option>
               ))}
@@ -155,14 +157,14 @@ export default function SearchPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              placeholder="From date"
+              placeholder={t('search.fromDate')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              placeholder="To date"
+              placeholder={t('search.toDate')}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             />
           </div>
@@ -170,14 +172,15 @@ export default function SearchPage() {
 
         {meta && (
           <p className="mb-6 text-sm text-gray-500">
-            {meta.total} result{meta.total !== 1 ? 's' : ''}
-            {query && <> for &ldquo;{query}&rdquo;</>}
+            {query
+              ? t('search.resultsCountFor', { count: meta.total, query })
+              : t('search.resultsCount', { count: meta.total })}
           </p>
         )}
 
         {!query && (
           <div className="py-12 text-center text-gray-500">
-            Enter a search term to find articles.
+            {t('search.enterTerm')}
           </div>
         )}
 

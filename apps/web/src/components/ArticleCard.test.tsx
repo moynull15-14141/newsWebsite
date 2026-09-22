@@ -1,11 +1,14 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import ArticleCard, { ArticleCardSkeleton, type ArticleCardVariant } from './ArticleCard';
+import { LanguageProvider } from '@/lib/i18n';
 
 vi.mock('react-router-dom', () => ({
   Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
     <a href={to} {...props}>{children}</a>
   ),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 const article = {
@@ -31,8 +34,13 @@ const variants: ArticleCardVariant[] = [
 ];
 
 function renderCard(imageUrl?: string) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToStaticMarkup(
-    <ArticleCard article={{ ...article, imageUrl }} variant="standard" />,
+    <QueryClientProvider client={client}>
+      <LanguageProvider>
+        <ArticleCard article={{ ...article, imageUrl }} variant="standard" />
+      </LanguageProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -51,6 +59,11 @@ describe('ArticleCard media behavior', () => {
     expect(markup).toContain('<img');
     expect(markup).toContain('src="/media/story.jpg"');
     expect(markup).toContain('loading="lazy"');
+  });
+
+  it('links to the article under the current (bare, default-language) path', () => {
+    const markup = renderCard();
+    expect(markup).toContain('href="/article/design-foundation"');
   });
 
   it.each(variants)('renders a meaningful %s skeleton', (variant) => {

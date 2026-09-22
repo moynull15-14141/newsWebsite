@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, withLang } from '@/lib/api';
 import ArticleList from '@/components/ArticleList';
 import SeoHead from '@/components/SeoHead';
 import { publicArticleRoutes } from '@/lib/public-routes';
+import { useLanguage } from '@/lib/i18n';
 
 interface Article {
   id: string;
@@ -33,14 +34,15 @@ interface ApiResponse {
 export default function AuthorPage() {
   const { id } = useParams<{ id: string }>();
   const [page, setPage] = useState(1);
+  const { code, t } = useLanguage();
 
   const { data, isLoading, error } = useQuery<ApiResponse>({
-    queryKey: ['author', id, page],
-    queryFn: () => apiFetch(`${publicArticleRoutes.author(id || '')}?page=${page}&limit=20`),
+    queryKey: ['author', id, page, code],
+    queryFn: () => apiFetch(withLang(`${publicArticleRoutes.author(id || '')}?page=${page}&limit=20`, code)),
     enabled: !!id,
   });
 
-  const authorName = data?.data?.[0]?.author?.name || 'Author';
+  const authorName = data?.data?.[0]?.author?.name || t('author.defaultName');
 
   if (isLoading) {
     return (
@@ -64,8 +66,8 @@ export default function AuthorPage() {
   if (error) {
     return (
       <div className="container-wide py-12 text-center">
-        <h2 className="text-xl font-semibold text-gray-900">Something went wrong</h2>
-        <p className="mt-2 text-gray-600">Unable to load articles.</p>
+        <h2 className="text-xl font-semibold text-gray-900">{t('common.somethingWrong')}</h2>
+        <p className="mt-2 text-gray-600">{t('common.unableToLoad')}</p>
       </div>
     );
   }
@@ -84,7 +86,7 @@ export default function AuthorPage() {
           {authorName}
         </h1>
         <p className="mb-8 text-sm text-gray-500">
-          {meta ? `${meta.total} articles` : 'Loading...'}
+          {meta ? `${meta.total} ${t('author.articles')}` : t('common.loading')}
         </p>
         <ArticleList
           articles={articles}

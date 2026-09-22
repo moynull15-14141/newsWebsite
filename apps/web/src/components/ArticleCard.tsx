@@ -3,6 +3,8 @@ import { Badge } from './Badge';
 import { Skeleton } from './Skeleton';
 import { ImagePlaceholder } from './ImagePlaceholder';
 import { contentLanguage } from '@/lib/content-language';
+import { useLanguage } from '@/lib/i18n';
+import { formatLocalizedShortDate } from '@/lib/format-date';
 
 interface Article {
   id: string;
@@ -33,19 +35,6 @@ interface ArticleCardProps {
   variant?: ArticleCardVariant;
 }
 
-function formatArticleDate(dateStr?: string | null): string {
-  if (!dateStr) return '';
-  try {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '';
-  }
-}
-
 function ArticleImage({
   src,
   alt,
@@ -64,13 +53,14 @@ function ArticleImage({
 }
 
 function ArticleMeta({ article }: { article: Article }) {
+  const { code } = useLanguage();
   const { author, publishedAt } = article;
   if (!author && !publishedAt) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
       {author && <span>{author.name}</span>}
       {author && publishedAt && <span>&middot;</span>}
-      {publishedAt && <time dateTime={publishedAt}>{formatArticleDate(publishedAt)}</time>}
+      {publishedAt && <time dateTime={publishedAt}>{formatLocalizedShortDate(publishedAt, code)}</time>}
     </div>
   );
 }
@@ -124,6 +114,8 @@ export function ArticleCardSkeleton({ variant = 'standard' }: { variant?: Articl
 }
 
 export default function ArticleCard({ article, variant = 'standard' }: ArticleCardProps) {
+  const { code, pathFor } = useLanguage();
+  const articleHref = pathFor(`/article/${article.slug}`, code);
   const imageUrl = article.featuredImageUrl || article.imageUrl || article.media?.publicUrl;
 
   const renderImage = (className: string, aspect = '16/9') => (
@@ -132,7 +124,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'featured' || variant === 'large') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="relative overflow-hidden rounded-lg">
           {renderImage('h-[300px] w-full object-cover transition-transform duration-300 group-hover:scale-105', '16/9')}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
@@ -153,7 +145,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'compact') {
     return (
-      <Link to={`/article/${article.slug}`} className="group flex min-w-0 gap-4">
+      <Link to={articleHref} className="group flex min-w-0 gap-4">
         <article className="flex w-full gap-4">
           {renderImage('h-16 w-20 flex-shrink-0 rounded object-cover', '4/3')}
           <div className="min-w-0 flex-1">
@@ -163,7 +155,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
             </h3>
             {article.publishedAt && (
               <time className="mt-1 block text-xs text-neutral-500">
-                {formatArticleDate(article.publishedAt)}
+                {formatLocalizedShortDate(article.publishedAt, code)}
               </time>
             )}
           </div>
@@ -174,7 +166,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'horizontal') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="flex w-full gap-6">
           {renderImage('h-24 w-32 flex-shrink-0 rounded object-cover', '4/3')}
           <div className="min-w-0 flex-1">
@@ -194,7 +186,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'image-top') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="overflow-hidden rounded-lg">
           {renderImage('h-[200px] w-full object-cover', '16/9')}
           <div className="p-5">
@@ -214,7 +206,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'text-only') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="p-6">
           <ArticleCategory category={article.category} />
           <h2 className="heading-2 text-neutral-800 mb-4 group-hover:text-primary-500">
@@ -231,7 +223,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'video') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="overflow-hidden rounded-lg">
           <div className="relative h-[200px] w-full">
             {renderImage('h-[200px] w-full object-cover', '16/9')}
@@ -258,7 +250,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   if (variant === 'opinion') {
     return (
-      <Link to={`/article/${article.slug}`} className="group block min-w-0">
+      <Link to={articleHref} className="group block min-w-0">
         <article className="overflow-hidden rounded-lg border-l-4 border-primary-500">
           <div className="p-5">
             <div className="mb-3 flex items-center gap-2">
@@ -282,7 +274,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
 
   // Standard variant (default)
   return (
-    <Link to={`/article/${article.slug}`} className="group block min-w-0">
+    <Link to={articleHref} className="group block min-w-0">
       <article className="flex w-full gap-5">
         {renderImage('h-28 w-36 flex-shrink-0 rounded object-cover sm:h-32 sm:w-40', '4/3')}
         <div className="min-w-0 flex-1">

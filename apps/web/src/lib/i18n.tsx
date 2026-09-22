@@ -1,3 +1,6 @@
+/* eslint-disable react-refresh/only-export-components -- this file colocates the language context,
+   its provider, its hook, and the small pure path helpers they share; splitting them into separate
+   files would only serve Vite's fast-refresh heuristic, not the code. */
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
