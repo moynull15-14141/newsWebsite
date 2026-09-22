@@ -1,71 +1,17 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuditLogService } from './audit-log.service';
 
+/** The scheduled-publishing sweep only — interactive publish/schedule/cancel/archive live on
+ * ArticlesService (the canonical, permission- and audit-checked workflow entry points used by the
+ * controller). This service used to duplicate those transitions with none of that enforcement; the
+ * duplicates were dead code (never wired to any controller) and were removed in Phase 2H. */
 @Injectable()
 export class PublishingService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  async publish(articleId: string, userId: string) {
-    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new NotFoundException('Article not found');
-    if (article.status !== 'APPROVED') {
-      throw new BadRequestException('Only approved articles can be published');
-    }
-
-    return this.prisma.article.update({
-      where: { id: articleId },
-      data: {
-        status: 'PUBLISHED',
-        publishedAt: new Date(),
-      },
-    });
-  }
-
-  async schedule(articleId: string, scheduledAt: Date, userId: string) {
-    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new NotFoundException('Article not found');
-    if (article.status !== 'APPROVED') {
-      throw new BadRequestException('Only approved articles can be scheduled');
-    }
-    if (scheduledAt <= new Date()) {
-      throw new BadRequestException('Scheduled time must be in the future');
-    }
-
-    return this.prisma.article.update({
-      where: { id: articleId },
-      data: { scheduledAt },
-    });
-  }
-
-  async cancelSchedule(articleId: string) {
-    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new NotFoundException('Article not found');
-
-    return this.prisma.article.update({
-      where: { id: articleId },
-      data: { scheduledAt: null },
-    });
-  }
-
-  async archive(articleId: string) {
-    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new NotFoundException('Article not found');
-    if (article.status !== 'PUBLISHED') {
-      throw new BadRequestException('Only published articles can be archived');
-    }
-
-    return this.prisma.article.update({
-      where: { id: articleId },
-      data: {
-        status: 'ARCHIVED',
-        archivedAt: new Date(),
-        isBreaking: false,
-        breakingStartedAt: null,
-        breakingEndsAt: null,
-        breakingPriority: null,
-      },
-    });
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLog: AuditLogService,
+  ) {}
 
   async executeScheduledPublications() {
     const now = new Date();
@@ -79,15 +25,29 @@ export class PublishingService {
     const published = [];
     for (const article of scheduledArticles) {
       try {
-        const updated = await this.prisma.article.update({
-          where: { id: article.id },
+        // updateMany with the status re-asserted in the WHERE clause: if a manual "Publish Now" (or a
+        // second overlapping sweep) already moved this article to PUBLISHED between the findMany above
+        // and this write, `count` comes back 0 and this article is skipped instead of being published
+        // twice or clobbering a fresher state (Phase 2I — "scheduler + manual publish simultaneously").
+        const { count } = await this.prisma.article.updateMany({
+          where: { id: article.id, status: 'APPROVED' },
           data: {
             status: 'PUBLISHED',
             publishedAt: now,
             scheduledAt: null,
           },
         });
-        published.push(updated);
+        if (count === 0) continue;
+
+        await this.auditLog.record({
+          articleId: article.id,
+          actorId: null,
+          action: 'PUBLISHED',
+          fromStatus: 'APPROVED',
+          toStatus: 'PUBLISHED',
+          note: 'Scheduled publication',
+        });
+        published.push({ ...article, status: 'PUBLISHED', publishedAt: now, scheduledAt: null });
       } catch (error) {
         console.error(`Failed to publish scheduled article ${article.id}:`, error);
       }

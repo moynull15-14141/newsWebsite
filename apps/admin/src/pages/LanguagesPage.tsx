@@ -38,7 +38,12 @@ export default function LanguagesPage() {
   const create = useMutation({
     mutationFn: () => apiFetch('/languages', { method: 'POST', body: JSON.stringify(form) }),
     onSuccess: () => {
+      // A new language is active by default, so every other page that offers a language picker
+      // (Article Editor's "Also write this in another language", Articles/Categories/Tags/Locations
+      // filters) reads the same public list — invalidate it too, not just this page's own admin list,
+      // so it shows up immediately without a manual reload.
       queryClient.invalidateQueries({ queryKey: ['languages-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['languages'] });
       setForm({ code: '', name: '', nativeName: '' });
       setShowForm(false);
       setFormError(null);
@@ -49,7 +54,12 @@ export default function LanguagesPage() {
   const update = useMutation({
     mutationFn: ({ id, ...patch }: { id: string } & Partial<Pick<Language, 'isActive' | 'isDefault' | 'name' | 'nativeName' | 'sortOrder'>>) =>
       apiFetch(`/languages/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['languages-admin'] }),
+    onSuccess: () => {
+      // Activating/deactivating or renaming a language changes what the public ['languages'] list
+      // returns too (e.g. toggling isActive), so keep it in sync the same way as create().
+      queryClient.invalidateQueries({ queryKey: ['languages-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['languages'] });
+    },
     onError: (err: unknown) => alert(getApiErrorMessage(err, 'Failed to update language')),
   });
 

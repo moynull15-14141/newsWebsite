@@ -3,6 +3,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ArticlesService } from './articles.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LanguagesService } from '../languages/languages.service';
+import { AuditLogService } from './services/audit-log.service';
+import { SeoService } from '../seo/seo.service';
 
 /**
  * Phase 2C: a story's Bangla and English versions are two real Article rows, explicitly linked by
@@ -48,6 +50,8 @@ describe('ArticlesService content translations', () => {
         ArticlesService,
         { provide: PrismaService, useValue: prisma },
         { provide: LanguagesService, useValue: { getDefault: jest.fn().mockResolvedValue(bn) } },
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue({}) } },
+        { provide: SeoService, useValue: { analyzeArticle: jest.fn().mockResolvedValue({ checks: [] }) } },
       ],
     }).compile();
 

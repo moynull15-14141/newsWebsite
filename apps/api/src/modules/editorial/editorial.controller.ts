@@ -14,7 +14,11 @@ export class EditorialController {
   constructor(private readonly service: EditorialService) {}
   @Get('articles/:articleId/notes') @RequirePermissions('article.read') notes(@Param('articleId') articleId: string) { return this.service.getNotes(articleId); }
   @Post('articles/:articleId/notes') @RequirePermissions('article.edit') note(@Param('articleId') articleId: string, @CurrentUser('userId') userId: string, @Body() dto: TextDto) { return this.service.addNote(articleId, userId, dto.content); }
-  @Post('articles/:articleId/corrections') @RequirePermissions('article.edit') correction(@Param('articleId') articleId: string, @CurrentUser('userId') userId: string, @Body() dto: TextDto) { return this.service.addCorrection(articleId, userId, dto.content); }
+  // Corrections are an editorial decision on content that is already public — gated behind review
+  // authority, not plain edit rights, so a reporter cannot unilaterally post a correction notice on
+  // their own published work (Phase 2H separation of duties).
+  @Get('articles/:articleId/corrections') @RequirePermissions('article.review') corrections(@Param('articleId') articleId: string) { return this.service.getCorrections(articleId); }
+  @Post('articles/:articleId/corrections') @RequirePermissions('article.review') correction(@Param('articleId') articleId: string, @CurrentUser('userId') userId: string, @Body() dto: TextDto) { return this.service.addCorrection(articleId, userId, dto.content); }
   @Get('settings') @RequirePermissions('settings.manage') settings() { return this.service.getSettings(); }
   @Patch('settings') @RequirePermissions('settings.manage') updateSettings(@CurrentUser('userId') userId: string, @Body() values: Record<string, unknown>) { return this.service.updateSettings(values, userId); }
 }

@@ -192,6 +192,7 @@ model User {
   createdCollections      EditorialCollection[]
   articleNotes            ArticleNote[]
   corrections             ArticleCorrection[]
+  auditLogEntries         ArticleAuditLog[]
   preferenceCategories    ReaderPreferenceCategory[]
   preferenceLocations     ReaderPreferenceLocation[]
   emailVerificationTokens EmailVerificationToken[]
@@ -435,6 +436,7 @@ model Article {
   collectionItems    ArticleCollection[]
   notes              ArticleNote[]
   corrections        ArticleCorrection[]
+  auditLogs          ArticleAuditLog[]
   notifications      Notification[]
   homepagePlacements HomepagePlacement[]
 
@@ -787,6 +789,26 @@ model ArticleCorrection {
 
   @@index([articleId, correctedAt])
   @@map("article_corrections")
+}
+
+/// One row per meaningful editorial action on an article (workflow transitions, published-article
+/// edits, corrections). Answers "who did what, to which article, when" for newsroom governance —
+/// deliberately does not store full article bodies, only a short human-readable note.
+model ArticleAuditLog {
+  id         String   @id @default(uuid())
+  articleId  String   @map("article_id")
+  actorId    String?  @map("actor_id")
+  action     String
+  fromStatus String?  @map("from_status")
+  toStatus   String?  @map("to_status")
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id])
+
+  @@index([articleId, createdAt])
+  @@map("article_audit_logs")
 }
 
 model PlatformSetting {

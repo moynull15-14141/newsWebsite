@@ -35,7 +35,7 @@ export interface WorkflowArticle {
 
 export interface ArticleAction {
   label: string;
-  action: 'edit' | 'submit-review' | 'approve' | 'return-to-draft' | 'publish' | 'archive' | 'delete';
+  action: 'edit' | 'submit-review' | 'approve' | 'return-to-draft' | 'publish' | 'archive' | 'unpublish' | 'restore' | 'delete';
 }
 
 /**
@@ -61,21 +61,67 @@ export function getArticleActions(
   if (article.status === 'DRAFT' && !!currentUserId && article.author?.id === currentUserId) {
     actions.push({ label: 'Submit Review', action: 'submit-review' });
   }
-  if (article.status === 'IN_REVIEW' && hasPermission('article.review')) {
-    actions.push({ label: 'Approve', action: 'approve' });
-    actions.push({ label: 'Return to Draft', action: 'return-to-draft' });
+  if (['IN_REVIEW', 'APPROVED'].includes(article.status) && hasPermission('article.review')) {
+    if (article.status === 'IN_REVIEW') actions.push({ label: 'Approve', action: 'approve' });
+    actions.push({ label: 'Request Changes', action: 'return-to-draft' });
   }
   if (article.status === 'APPROVED' && hasPermission('article.publish')) {
     actions.push({ label: 'Publish', action: 'publish' });
   }
   if (article.status === 'PUBLISHED' && hasPermission('article.publish')) {
     actions.push({ label: 'Archive', action: 'archive' });
+    actions.push({ label: 'Unpublish', action: 'unpublish' });
   }
-  if (hasPermission('article.delete')) {
+  // Restoring is the archive/unpublish workflow in reverse — same permission, same reversibility
+  // guarantee: it re-enters DRAFT rather than jumping straight back to PUBLISHED (Phase 2I).
+  if (article.status === 'ARCHIVED' && hasPermission('article.publish')) {
+    actions.push({ label: 'Restore', action: 'restore' });
+  }
+  // Hard-delete is only safe for untouched drafts — anything reviewed/published has real editorial
+  // history the API now refuses to erase (Phase 2H), so don't offer a button that would just 400.
+  if (article.status === 'DRAFT' && hasPermission('article.delete')) {
     actions.push({ label: 'Delete', action: 'delete' });
   }
 
   return actions;
+}
+
+export interface QueueWarningArticle {
+  status: string;
+  excerpt?: string | null;
+  featuredImageId?: string | null;
+  seoDescription?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  scheduledAt?: string | null;
+}
+
+const STALE_DRAFT_DAYS = 14;
+const STALE_REVIEW_DAYS = 3;
+
+/**
+ * Cheap, deterministic warning count for a Review Queue row — computed only from fields the list
+ * query already returns, so showing it never costs an extra request per row (mirrors the server's
+ * `evaluateStalenessAndScheduleWarnings`/metadata checks at a glance; the full duplicate-content and
+ * SEO-derived warnings only run in the single-article Editor's `/articles/:id/readiness` call).
+ */
+export function countQueueWarnings(article: QueueWarningArticle, now = new Date()): number {
+  let count = 0;
+  if (!article.featuredImageId) count += 1;
+  if (!article.excerpt?.trim()) count += 1;
+  if (!article.seoDescription?.trim()) count += 1;
+
+  const daysSince = (iso: string) => (now.getTime() - new Date(iso).getTime()) / 86_400_000;
+  if (article.status === 'DRAFT' && daysSince(article.createdAt) > STALE_DRAFT_DAYS) count += 1;
+  if (article.status === 'IN_REVIEW' && daysSince(article.updatedAt || article.createdAt) > STALE_REVIEW_DAYS) count += 1;
+
+  if (article.scheduledAt) {
+    const scheduled = new Date(article.scheduledAt).getTime();
+    if (scheduled <= now.getTime() && article.status !== 'PUBLISHED') count += 1;
+    else if (!['APPROVED', 'PUBLISHED'].includes(article.status)) count += 1;
+  }
+
+  return count;
 }
 
 export interface ArticleDraftInput {

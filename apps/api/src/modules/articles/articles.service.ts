@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { QueryArticlesDto } from './dto/query-articles.dto';
 import { LanguagesService } from '../languages/languages.service';
+import { AuditLogService } from './services/audit-log.service';
+import { SeoService } from '../seo/seo.service';
+import { evaluateBlockingIssues, evaluateStalenessAndScheduleWarnings, ReadinessIssue } from './editorial-readiness';
 import { ArticleStatus } from '@prisma/client';
 
 const LANGUAGE_SELECT = { select: { id: true, code: true, name: true, nativeName: true } } as const;
@@ -13,7 +16,64 @@ export class ArticlesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly languagesService: LanguagesService,
+    private readonly auditLog: AuditLogService,
+    private readonly seoService: SeoService,
   ) {}
+
+  /** Editorial readiness: deterministic blocking issues plus staleness/schedule/SEO-derived warnings
+   * (Phase 2H). Reuses the existing SEO Intelligence analyzer for duplicate/metadata warnings instead
+   * of re-implementing them. */
+  async getReadiness(id: string) {
+    const article = await this.prisma.article.findUnique({ where: { id } });
+    if (!article) {
+      throw new NotFoundException('Article not found');
+    }
+
+    const blocking: ReadinessIssue[] = evaluateBlockingIssues(article);
+    const warnings: ReadinessIssue[] = evaluateStalenessAndScheduleWarnings(article);
+
+    const seo = await this.seoService.analyzeArticle(id);
+    const seoWarningChecks = seo.checks.filter((c) =>
+      ['meta-description', 'featured-image', 'duplicate-title', 'duplicate-slug', 'duplicate-description', 'entity-context'].includes(c.id) &&
+      (c.status === 'WARNING' || c.status === 'ERROR'),
+    );
+    for (const c of seoWarningChecks) {
+      warnings.push({ code: c.id.toUpperCase().replace(/-/g, '_'), message: c.message });
+    }
+
+    return { blocking, warnings };
+  }
+
+  /** Snapshots the article's current persisted state into a new revision row before a mutation that
+   * could otherwise silently overwrite it with no way back (Phase 2H — editorial auditability). */
+  private async snapshotRevision(articleId: string, changedById: string, changeReason: string) {
+    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
+    if (!article) return null;
+
+    const latestRevision = await this.prisma.articleRevision.findFirst({
+      where: { articleId },
+      orderBy: { version: 'desc' },
+    });
+    const nextVersion = (latestRevision?.version || 0) + 1;
+
+    return this.prisma.articleRevision.create({
+      data: {
+        articleId,
+        version: nextVersion,
+        title: article.title,
+        excerpt: article.excerpt,
+        content: article.content as any,
+        slug: article.slug,
+        categoryId: article.categoryId,
+        locationId: article.locationId,
+        featuredImageId: article.featuredImageId,
+        authorId: article.authorId,
+        status: article.status,
+        changedById,
+        changeReason,
+      },
+    });
+  }
 
   async create(dto: CreateArticleDto, authorId: string) {
     const slug = dto.slug || this.slugify(dto.title);
@@ -60,6 +120,8 @@ export class ArticlesService {
         articleTags: { include: { tag: true } },
       },
     });
+
+    await this.auditLog.record({ articleId: article.id, actorId: authorId, action: 'CREATED', toStatus: 'DRAFT' });
 
     return article;
   }
@@ -188,6 +250,16 @@ export class ArticlesService {
       throw new ForbiddenException('You can only edit your own articles');
     }
 
+    // Optimistic concurrency: if the editor tells us which version it loaded and that no longer
+    // matches what's persisted, someone else saved in between — reject rather than silently clobber
+    // their change (Phase 2H).
+    if (dto.expectedUpdatedAt && new Date(dto.expectedUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
+      throw new ConflictException({
+        message: 'This article was changed by another user. Reload the latest version before continuing.',
+        code: 'ARTICLE_VERSION_CONFLICT',
+      });
+    }
+
     // Unlike create(), a saved article keeps resubmitting its own current slug on every save (the
     // editor form always sends the loaded value), so this only rejects an actual collision with a
     // *different* article rather than the article's own unchanged slug.
@@ -227,7 +299,15 @@ export class ArticlesService {
       }
     }
 
-    return this.prisma.article.update({
+    // Editing content that is already live (or was live and is now archived) must never be a silent
+    // mutation: snapshot the pre-edit state as a revision first, so the previous public version is
+    // always recoverable, and leave an audit trail distinct from an ordinary draft edit (Phase 2H).
+    const editingLiveContent = existing.status === 'PUBLISHED' || existing.status === 'ARCHIVED';
+    if (editingLiveContent && Object.keys(updateData).length > 0) {
+      await this.snapshotRevision(id, userId, `Auto-snapshot before editing ${existing.status.toLowerCase()} article`);
+    }
+
+    const updated = await this.prisma.article.update({
       where: { id },
       data: updateData,
       include: {
@@ -238,6 +318,18 @@ export class ArticlesService {
         articleTags: { include: { tag: true } },
       },
     });
+
+    if (Object.keys(updateData).length > 0 || dto.tagIds !== undefined) {
+      const changedFields = [...Object.keys(updateData), ...(dto.tagIds !== undefined ? ['tags'] : [])];
+      await this.auditLog.record({
+        articleId: id,
+        actorId: userId,
+        action: editingLiveContent ? 'LIVE_CONTENT_EDITED' : 'UPDATED',
+        note: `Changed: ${changedFields.join(', ')}`,
+      });
+    }
+
+    return updated;
   }
 
   async remove(id: string, userId: string, userPermissions: string[]) {
@@ -248,6 +340,13 @@ export class ArticlesService {
 
     if (existing.authorId !== userId && !userPermissions.includes('article.delete')) {
       throw new ForbiddenException('You can only delete your own articles');
+    }
+
+    // Anything that has entered review/approval/publication has real editorial history — permanently
+    // erasing the row would erase that history too. Only untouched drafts can be hard-deleted; a
+    // published or previously-reviewed article must be archived instead (Phase 2H).
+    if (existing.status !== 'DRAFT') {
+      throw new BadRequestException('Only draft articles can be permanently deleted. Archive it instead.');
     }
 
     await this.prisma.articleTag.deleteMany({ where: { articleId: id } });
@@ -270,13 +369,20 @@ export class ArticlesService {
       throw new BadRequestException('Only draft articles can be submitted for review');
     }
 
-    return this.prisma.article.update({
+    const blocking = evaluateBlockingIssues(existing);
+    if (blocking.length > 0) {
+      throw new BadRequestException({ message: blocking[0].message, code: blocking[0].code, blocking });
+    }
+
+    const updated = await this.prisma.article.update({
       where: { id },
       data: { status: 'IN_REVIEW' },
     });
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'SUBMITTED_FOR_REVIEW', fromStatus: 'DRAFT', toStatus: 'IN_REVIEW' });
+    return updated;
   }
 
-  async approve(id: string, userId: string) {
+  async approve(id: string, userId: string, userPermissions: string[] = []) {
     const existing = await this.prisma.article.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Article not found');
@@ -286,14 +392,29 @@ export class ArticlesService {
       throw new BadRequestException('Only articles in review can be approved');
     }
 
-    return this.prisma.article.update({
-      where: { id },
-      data: {
-        status: 'APPROVED',
-        reviewedAt: new Date(),
-        reviewedById: userId,
-      },
+    // Separation of duties: a reviewer approving their own article defeats the purpose of review.
+    // Only someone who can also publish (Editor-in-Chief/Admin) may knowingly override this, and that
+    // override is itself auditable via the actor/article pair on the resulting log entry.
+    if (existing.authorId === userId && !userPermissions.includes('article.publish')) {
+      throw new ForbiddenException('You cannot approve your own article. Ask another reviewer to approve it.');
+    }
+
+    // Guard the transition at the database level, not just on the value read above: if a second
+    // reviewer's request already moved this article out of IN_REVIEW between that read and this write,
+    // updateMany matches zero rows instead of silently overwriting whatever they just set — the classic
+    // "two reviewers approve simultaneously" race (Phase 2I).
+    const { count } = await this.prisma.article.updateMany({
+      where: { id, status: 'IN_REVIEW' },
+      data: { status: 'APPROVED', reviewedAt: new Date(), reviewedById: userId },
     });
+    if (count === 0) {
+      throw new ConflictException({ message: 'This article is no longer awaiting review — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
+    }
+
+    const updated = await this.prisma.article.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Article not found');
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'APPROVED', fromStatus: 'IN_REVIEW', toStatus: 'APPROVED' });
+    return updated;
   }
 
   async publish(id: string, userId: string) {
@@ -306,16 +427,28 @@ export class ArticlesService {
       throw new BadRequestException('Only approved articles can be published');
     }
 
-    return this.prisma.article.update({
-      where: { id },
-      data: {
-        status: 'PUBLISHED',
-        publishedAt: new Date(),
-      },
+    const blocking = evaluateBlockingIssues(existing);
+    if (blocking.length > 0) {
+      throw new BadRequestException({ message: blocking[0].message, code: blocking[0].code, blocking });
+    }
+
+    // Same database-level guard as approve(): prevents two concurrent publish requests (or a manual
+    // publish racing the scheduled-publishing sweep) from both succeeding against a stale read.
+    const { count } = await this.prisma.article.updateMany({
+      where: { id, status: 'APPROVED' },
+      data: { status: 'PUBLISHED', publishedAt: new Date() },
     });
+    if (count === 0) {
+      throw new ConflictException({ message: 'This article is no longer approved — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
+    }
+
+    const updated = await this.prisma.article.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Article not found');
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'PUBLISHED', fromStatus: 'APPROVED', toStatus: 'PUBLISHED' });
+    return updated;
   }
 
-  async archive(id: string) {
+  async archive(id: string, userId?: string) {
     const existing = await this.prisma.article.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Article not found');
@@ -325,16 +458,83 @@ export class ArticlesService {
       throw new BadRequestException('Only published articles can be archived');
     }
 
-    return this.prisma.article.update({
-      where: { id },
+    // Guards against "publish + archive at the same time": if the article was unpublished/archived by
+    // another request in between, this matches zero rows instead of archiving a no-longer-published row.
+    const { count } = await this.prisma.article.updateMany({
+      where: { id, status: 'PUBLISHED' },
       data: {
         status: 'ARCHIVED',
         archivedAt: new Date(),
+        // An archived article is no longer publicly promotable — clear stale breaking-news state so
+        // it can never resurface if the article is later republished (Phase 2H).
+        isBreaking: false,
+        breakingStartedAt: null,
+        breakingEndsAt: null,
+        breakingPriority: null,
       },
     });
+    if (count === 0) {
+      throw new ConflictException({ message: 'This article is no longer published — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
+    }
+
+    const updated = await this.prisma.article.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Article not found');
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'ARCHIVED', fromStatus: 'PUBLISHED', toStatus: 'ARCHIVED' });
+    return updated;
   }
 
-  async returnToDraft(id: string, userId: string) {
+  /** PUBLISHED -> DRAFT: pulls a live article back off the public site without erasing it (Phase 2I).
+   * Unlike archive(), this is meant for "we need to fix this before anyone reads it again" rather than
+   * end-of-life; the article re-enters the normal DRAFT -> review -> publish workflow from scratch. */
+  async unpublish(id: string, userId?: string) {
+    const existing = await this.prisma.article.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Article not found');
+    }
+    if (existing.status !== 'PUBLISHED') {
+      throw new BadRequestException('Only published articles can be unpublished');
+    }
+
+    const { count } = await this.prisma.article.updateMany({
+      where: { id, status: 'PUBLISHED' },
+      data: { status: 'DRAFT', publishedAt: null },
+    });
+    if (count === 0) {
+      throw new ConflictException({ message: 'This article is no longer published — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
+    }
+
+    const updated = await this.prisma.article.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Article not found');
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'UNPUBLISHED', fromStatus: 'PUBLISHED', toStatus: 'DRAFT' });
+    return updated;
+  }
+
+  /** ARCHIVED -> DRAFT: brings a retired article back into the editorial workflow (Phase 2I). Does not
+   * republish it directly — a restored article must clear review again like any other draft. */
+  async restore(id: string, userId?: string) {
+    const existing = await this.prisma.article.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Article not found');
+    }
+    if (existing.status !== 'ARCHIVED') {
+      throw new BadRequestException('Only archived articles can be restored');
+    }
+
+    const { count } = await this.prisma.article.updateMany({
+      where: { id, status: 'ARCHIVED' },
+      data: { status: 'DRAFT', archivedAt: null },
+    });
+    if (count === 0) {
+      throw new ConflictException({ message: 'This article is no longer archived — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
+    }
+
+    const updated = await this.prisma.article.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Article not found');
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'RESTORED', fromStatus: 'ARCHIVED', toStatus: 'DRAFT' });
+    return updated;
+  }
+
+  async returnToDraft(id: string, userId: string, reason?: string) {
     const existing = await this.prisma.article.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Article not found');
@@ -344,10 +544,19 @@ export class ArticlesService {
       throw new BadRequestException('Only articles in review or approved can be returned to draft');
     }
 
-    return this.prisma.article.update({
+    const updated = await this.prisma.article.update({
       where: { id },
       data: { status: 'DRAFT' },
     });
+    await this.auditLog.record({
+      articleId: id,
+      actorId: userId,
+      action: 'RETURNED_TO_DRAFT',
+      fromStatus: existing.status,
+      toStatus: 'DRAFT',
+      note: reason,
+    });
+    return updated;
   }
 
   async saveRevision(id: string, userId: string, changeReason?: string, userPermissions: string[] = []) {
@@ -385,6 +594,18 @@ export class ArticlesService {
     });
   }
 
+  async getAuditLog(articleId: string, userId = '', userPermissions: string[] = []) {
+    const article = await this.prisma.article.findUnique({ where: { id: articleId } });
+    if (!article) {
+      throw new NotFoundException('Article not found');
+    }
+    if (article.authorId !== userId && !userPermissions.includes('audit.read')) {
+      throw new ForbiddenException('You cannot view the audit trail for this article');
+    }
+
+    return this.auditLog.listForArticle(articleId);
+  }
+
   async getRevisions(articleId: string, userId = '', userPermissions: string[] = []) {
     const article = await this.prisma.article.findUnique({ where: { id: articleId } });
     if (!article) {
@@ -417,6 +638,10 @@ export class ArticlesService {
       throw new NotFoundException('Revision not found');
     }
 
+    // Restoring an old revision overwrites the article's CURRENT content — snapshot that current
+    // state first, so restoring is never a one-way, unrecoverable action (Phase 2H).
+    await this.snapshotRevision(articleId, userId, `Auto-snapshot before restoring to version ${revision.version}`);
+
     const updateData: any = {
       title: revision.title,
       excerpt: revision.excerpt,
@@ -448,17 +673,26 @@ export class ArticlesService {
       throw new ForbiddenException('You can only schedule your own articles');
     }
 
-    if (!['APPROVED', 'DRAFT'].includes(existing.status)) {
-      throw new BadRequestException('Only approved or draft articles can be scheduled');
+    // The scheduled-publishing sweep only ever promotes APPROVED articles (see
+    // PublishingService.executeScheduledPublications), so accepting a DRAFT here would silently set a
+    // scheduledAt that can never fire — scheduling must require the article has already cleared review.
+    if (existing.status !== 'APPROVED') {
+      throw new BadRequestException('Only approved articles can be scheduled');
     }
 
-    return this.prisma.article.update({
+    if (new Date(scheduledAt).getTime() <= Date.now()) {
+      throw new BadRequestException('Scheduled time must be in the future');
+    }
+
+    const updated = await this.prisma.article.update({
       where: { id },
       data: {
         scheduledAt: new Date(scheduledAt),
         status: existing.status,
       },
     });
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'SCHEDULED', note: `Scheduled for ${scheduledAt}` });
+    return updated;
   }
 
   async cancelSchedule(id: string, userId = '', userPermissions: string[] = []) {
@@ -470,10 +704,12 @@ export class ArticlesService {
       throw new ForbiddenException('You can only cancel schedules for your own articles');
     }
 
-    return this.prisma.article.update({
+    const updated = await this.prisma.article.update({
       where: { id },
       data: { scheduledAt: null },
     });
+    await this.auditLog.record({ articleId: id, actorId: userId, action: 'SCHEDULE_CANCELLED' });
+    return updated;
   }
 
   async getStats() {

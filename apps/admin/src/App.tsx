@@ -3,6 +3,7 @@ import AdminLayout from './layouts/AdminLayout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ArticlesPage from './pages/ArticlesPage';
+import ReviewQueuePage from './pages/ReviewQueuePage';
 import ArticleEditorPage from './pages/ArticleEditorPage';
 import RevisionsPage from './pages/RevisionsPage';
 import MediaPage from './pages/MediaPage';
@@ -36,6 +37,7 @@ function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="articles" element={<ArticlesPage />} />
+        <Route path="review" element={<ReviewQueuePage />} />
         <Route path="articles/new" element={<ArticleEditorPage />} />
         <Route path="articles/:id/edit" element={<ArticleEditorPage />} />
         <Route path="articles/:id/revisions" element={<RevisionsPage />} />

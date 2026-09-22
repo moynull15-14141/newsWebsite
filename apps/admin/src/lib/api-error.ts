@@ -44,6 +44,7 @@ export class ApiError extends Error {
 }
 
 export const HOMEPAGE_DRAFT_CONFLICT = 'HOMEPAGE_DRAFT_CONFLICT';
+export const ARTICLE_VERSION_CONFLICT = 'ARTICLE_VERSION_CONFLICT';
 
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
@@ -52,6 +53,11 @@ export function isApiError(error: unknown): error is ApiError {
 /** The homepage draft was changed by someone else (HTTP 409 + HOMEPAGE_DRAFT_CONFLICT). */
 export function isDraftConflict(error: unknown): error is ApiError {
   return isApiError(error) && error.status === 409 && error.code === HOMEPAGE_DRAFT_CONFLICT;
+}
+
+/** Someone else saved this article since the editor loaded it (HTTP 409 + ARTICLE_VERSION_CONFLICT). */
+export function isArticleVersionConflict(error: unknown): error is ApiError {
+  return isApiError(error) && error.status === 409 && error.code === ARTICLE_VERSION_CONFLICT;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);

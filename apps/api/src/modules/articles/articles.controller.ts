@@ -23,6 +23,8 @@ export class ArticlesController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
   findAll(@Query() query: QueryArticlesDto) {
     return this.articlesService.findAll(query);
   }
@@ -34,12 +36,20 @@ export class ArticlesController {
     return this.articlesService.getStats();
   }
 
+  // Admin-only lookups by id/slug — regardless of status. The public site never calls these; it goes
+  // through PublicController/PublicService, which only ever returns PUBLISHED articles (Phase 2I: these
+  // previously required no permission at all, just any authenticated session — a viewer with zero
+  // article permissions could still read every draft in the system).
   @Get('slug/:slug')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
   findBySlug(@Param('slug') slug: string) {
     return this.articlesService.findBySlug(slug);
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
   findOne(@Param('id') id: string) {
     return this.articlesService.findOne(id);
   }
@@ -49,6 +59,20 @@ export class ArticlesController {
   @RequirePermissions('article.read')
   getRevisions(@Param('id') id: string, @CurrentUser('userId') userId: string, @Req() req: any) {
     return this.articlesService.getRevisions(id, userId, req.user?.permissions || []);
+  }
+
+  @Get(':id/audit-log')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
+  getAuditLog(@Param('id') id: string, @CurrentUser('userId') userId: string, @Req() req: any) {
+    return this.articlesService.getAuditLog(id, userId, req.user?.permissions || []);
+  }
+
+  @Get(':id/readiness')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
+  getReadiness(@Param('id') id: string) {
+    return this.articlesService.getReadiness(id);
   }
 
   @Patch(':id')
@@ -85,8 +109,8 @@ export class ArticlesController {
   @Post(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('article.review')
-  approve(@Param('id') id: string, @CurrentUser('userId') userId: string) {
-    return this.articlesService.approve(id, userId);
+  approve(@Param('id') id: string, @CurrentUser('userId') userId: string, @Req() req: any) {
+    return this.articlesService.approve(id, userId, req.user?.permissions || []);
   }
 
   @Post(':id/publish')
@@ -99,15 +123,29 @@ export class ArticlesController {
   @Post(':id/archive')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('article.publish')
-  archive(@Param('id') id: string) {
-    return this.articlesService.archive(id);
+  archive(@Param('id') id: string, @CurrentUser('userId') userId: string) {
+    return this.articlesService.archive(id, userId);
+  }
+
+  @Post(':id/unpublish')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.publish')
+  unpublish(@Param('id') id: string, @CurrentUser('userId') userId: string) {
+    return this.articlesService.unpublish(id, userId);
+  }
+
+  @Post(':id/restore')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.publish')
+  restore(@Param('id') id: string, @CurrentUser('userId') userId: string) {
+    return this.articlesService.restore(id, userId);
   }
 
   @Post(':id/return-to-draft')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('article.review')
-  returnToDraft(@Param('id') id: string, @CurrentUser('userId') userId: string) {
-    return this.articlesService.returnToDraft(id, userId);
+  returnToDraft(@Param('id') id: string, @CurrentUser('userId') userId: string, @Body('reason') reason?: string) {
+    return this.articlesService.returnToDraft(id, userId, reason);
   }
 
   @Post(':id/revisions')

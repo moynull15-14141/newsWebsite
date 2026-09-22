@@ -81,4 +81,12 @@ export class UpdateArticleDto {
   @IsString()
   @IsOptional()
   languageId?: string;
+
+  /** The `updatedAt` the editor last loaded, for optimistic-concurrency checking (Phase 2H). When
+   * provided and it no longer matches the persisted row, the update is rejected with 409 rather than
+   * silently overwriting whatever another editor saved in the meantime. Omitted entirely by callers
+   * that don't care about staleness (e.g. workflow actions that patch a single field). */
+  @IsDateString()
+  @IsOptional()
+  expectedUpdatedAt?: string;
 }

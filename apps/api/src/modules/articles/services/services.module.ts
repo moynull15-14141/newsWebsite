@@ -4,7 +4,7 @@ import { BreakingNewsService } from './breaking-news.service';
 import { ArticleViewService } from './article-view.service';
 import { TrendingService } from './trending.service';
 import { MostReadService } from './most-read.service';
-import { ArticleRevisionService } from './article-revision.service';
+import { AuditLogService } from './audit-log.service';
 
 @Module({
   providers: [
@@ -13,7 +13,7 @@ import { ArticleRevisionService } from './article-revision.service';
     ArticleViewService,
     TrendingService,
     MostReadService,
-    ArticleRevisionService,
+    AuditLogService,
   ],
   exports: [
     PublishingService,
@@ -21,7 +21,7 @@ import { ArticleRevisionService } from './article-revision.service';
     ArticleViewService,
     TrendingService,
     MostReadService,
-    ArticleRevisionService,
+    AuditLogService,
   ],
 })
 export class ServicesModule {}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildArticleListQuery, getArticleActions, validateArticleDraft } from './articles';
+import { buildArticleListQuery, countQueueWarnings, getArticleActions, validateArticleDraft } from './articles';
 
 describe('buildArticleListQuery', () => {
   it('sends only page and limit when no filters are set', () => {
@@ -60,7 +60,7 @@ describe('getArticleActions', () => {
     expect(actions.map((a) => a.action)).toEqual(['edit', 'submit-review']);
   });
 
-  it('shows Approve and Return to Draft for IN_REVIEW only with article.review', () => {
+  it('shows Approve and Request Changes for IN_REVIEW only with article.review', () => {
     const withoutReview = getArticleActions({ status: 'IN_REVIEW' }, allow('article.edit'), ME);
     expect(withoutReview.map((a) => a.action)).toEqual(['edit']);
 
@@ -68,27 +68,44 @@ describe('getArticleActions', () => {
     expect(withReview.map((a) => a.action)).toEqual(['edit', 'approve', 'return-to-draft']);
   });
 
+  it('shows Request Changes (but not Approve) for an already-APPROVED article, with article.review', () => {
+    const actions = getArticleActions({ status: 'APPROVED' }, allow('article.review'), ME);
+    expect(actions.map((a) => a.action)).toEqual(['return-to-draft']);
+  });
+
   it('shows Publish for APPROVED only with article.publish', () => {
     const actions = getArticleActions({ status: 'APPROVED' }, allow('article.publish'), ME);
     expect(actions.map((a) => a.action)).toContain('publish');
   });
 
-  it('shows Archive for PUBLISHED only with article.publish, never Publish again', () => {
+  it('shows Archive and Unpublish for PUBLISHED only with article.publish, never Publish again', () => {
     const actions = getArticleActions({ status: 'PUBLISHED' }, allow('article.publish'), ME);
-    expect(actions.map((a) => a.action)).toEqual(['archive']);
+    expect(actions.map((a) => a.action)).toEqual(['archive', 'unpublish']);
   });
 
-  it('never offers Publish or Approve for an ARCHIVED article regardless of permissions', () => {
+  it('never offers Publish or Approve for an ARCHIVED article regardless of permissions, but offers Restore with article.publish', () => {
     const actions = getArticleActions({ status: 'ARCHIVED' }, allow('article.edit', 'article.review', 'article.publish'), ME);
+    expect(actions.map((a) => a.action)).toEqual(['edit', 'restore']);
+  });
+
+  it('does not offer Restore on an ARCHIVED article without article.publish', () => {
+    const actions = getArticleActions({ status: 'ARCHIVED' }, allow('article.edit'), ME);
     expect(actions.map((a) => a.action)).toEqual(['edit']);
   });
 
-  it('shows Delete only with article.delete, independent of status', () => {
+  it('shows Delete only with article.delete on a DRAFT — the API refuses to hard-delete anything else', () => {
     const withoutDelete = getArticleActions(draftByMe, allow('article.edit'), ME);
     expect(withoutDelete.map((a) => a.action)).not.toContain('delete');
 
     const withDelete = getArticleActions(draftByMe, allow('article.edit', 'article.delete'), ME);
     expect(withDelete.map((a) => a.action)).toContain('delete');
+  });
+
+  it('never offers Delete once an article has left DRAFT, even with article.delete', () => {
+    for (const status of ['IN_REVIEW', 'APPROVED', 'PUBLISHED', 'ARCHIVED']) {
+      const actions = getArticleActions({ status }, allow('article.delete'), ME);
+      expect(actions.map((a) => a.action)).not.toContain('delete');
+    }
   });
 
   it('grants every action the viewer is entitled to, without a signed-in user id for submit-review', () => {
@@ -97,7 +114,7 @@ describe('getArticleActions', () => {
       allow('article.edit', 'article.review', 'article.publish', 'article.delete'),
       undefined,
     );
-    expect(actions.map((a) => a.action)).toEqual(['edit', 'approve', 'return-to-draft', 'delete']);
+    expect(actions.map((a) => a.action)).toEqual(['edit', 'approve', 'return-to-draft']);
   });
 });
 
@@ -112,5 +129,50 @@ describe('validateArticleDraft', () => {
 
   it('accepts a real title', () => {
     expect(validateArticleDraft({ title: 'Flood relief reaches Sylhet' })).toEqual([]);
+  });
+});
+
+describe('countQueueWarnings', () => {
+  const now = new Date('2026-02-01T00:00:00Z');
+  const complete = {
+    status: 'PUBLISHED',
+    excerpt: 'A solid excerpt',
+    featuredImageId: 'media-1',
+    seoDescription: 'A solid meta description',
+    createdAt: '2026-01-30T00:00:00Z',
+    updatedAt: '2026-01-30T00:00:00Z',
+    scheduledAt: null,
+  };
+
+  it('counts zero warnings for a fully complete published article', () => {
+    expect(countQueueWarnings(complete, now)).toBe(0);
+  });
+
+  it('counts missing featured image, excerpt and SEO description separately', () => {
+    expect(countQueueWarnings({ ...complete, featuredImageId: null, excerpt: '', seoDescription: null }, now)).toBe(3);
+  });
+
+  it('flags a draft older than 14 days as stale', () => {
+    expect(countQueueWarnings({ ...complete, status: 'DRAFT', createdAt: '2026-01-01T00:00:00Z' }, now)).toBe(1);
+  });
+
+  it('does not flag a fresh draft as stale', () => {
+    expect(countQueueWarnings({ ...complete, status: 'DRAFT', createdAt: '2026-01-30T00:00:00Z' }, now)).toBe(0);
+  });
+
+  it('flags an article awaiting review for more than 3 days', () => {
+    expect(countQueueWarnings({ ...complete, status: 'IN_REVIEW', updatedAt: '2026-01-20T00:00:00Z' }, now)).toBe(1);
+  });
+
+  it('flags a schedule that has already passed', () => {
+    expect(countQueueWarnings({ ...complete, status: 'APPROVED', scheduledAt: '2026-01-01T00:00:00Z' }, now)).toBe(1);
+  });
+
+  it('flags a schedule set on an article that is not yet approved', () => {
+    expect(countQueueWarnings({ ...complete, status: 'DRAFT', createdAt: '2026-01-30T00:00:00Z', scheduledAt: '2026-03-01T00:00:00Z' }, now)).toBe(1);
+  });
+
+  it('does not flag a future schedule on an approved article', () => {
+    expect(countQueueWarnings({ ...complete, status: 'APPROVED', scheduledAt: '2026-03-01T00:00:00Z' }, now)).toBe(0);
   });
 });

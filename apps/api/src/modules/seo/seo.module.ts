@@ -8,5 +8,6 @@ import { SeoService } from './seo.service';
   imports: [PrismaModule, LanguagesModule],
   controllers: [SeoController],
   providers: [SeoService],
+  exports: [SeoService],
 })
 export class SeoModule {}

@@ -105,6 +105,13 @@ function lengthStatus(value: string, goodMin: number, max: number): SeoStatus {
   return 'PASS';
 }
 
+/** True when TipTap/plain-text `content` has at least one real word — used by editorial workflow
+ * guards (submit-review/publish) so "no body content" is judged by the same text extraction the SEO
+ * analyzer already uses, instead of a second ad-hoc emptiness check. */
+export function hasBodyContent(content: unknown): boolean {
+  return walkContent(content).words > 0;
+}
+
 export function analyzeArticleSeo(input: SeoArticleInput): SeoAnalysis {
   const title = (input.seoTitle || input.title || '').trim();
   const description = (input.seoDescription || input.excerpt || '').trim();

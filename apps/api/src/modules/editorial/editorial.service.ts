@@ -17,7 +17,19 @@ export class EditorialService {
   async addCorrection(articleId: string, correctedById: string, description: string) {
     const article = await this.prisma.article.findUnique({ where: { id: articleId, status: 'PUBLISHED' } });
     if (!article) throw new NotFoundException('Published article not found');
-    return this.prisma.articleCorrection.create({ data: { articleId, correctedById, description: description.trim() } });
+    const correction = await this.prisma.articleCorrection.create({ data: { articleId, correctedById, description: description.trim() } });
+    await this.prisma.articleAuditLog.create({
+      data: { articleId, actorId: correctedById, action: 'CORRECTED', note: description.trim().slice(0, 2000) },
+    });
+    return correction;
+  }
+
+  async getCorrections(articleId: string) {
+    return this.prisma.articleCorrection.findMany({
+      where: { articleId },
+      orderBy: { correctedAt: 'desc' },
+      include: { correctedBy: { select: { id: true, name: true } } },
+    });
   }
 
   async getPublicCorrections(articleId: string) {

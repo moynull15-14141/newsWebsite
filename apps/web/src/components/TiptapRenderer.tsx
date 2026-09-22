@@ -44,17 +44,47 @@ function renderMarks(text: string, marks?: TiptapMark[]): React.ReactNode {
             {acc}
           </code>
         );
+      case 'underline':
+        return <u key={mark.type}>{acc}</u>;
+      case 'strike':
+        return <s key={mark.type}>{acc}</s>;
+      case 'subscript':
+        return <sub key={mark.type}>{acc}</sub>;
+      case 'superscript':
+        return <sup key={mark.type}>{acc}</sup>;
+      case 'textStyle':
+        return mark.attrs?.color ? (
+          <span key={mark.type} style={{ color: mark.attrs.color as string }}>
+            {acc}
+          </span>
+        ) : (
+          acc
+        );
+      case 'highlight':
+        return (
+          <mark
+            key={mark.type}
+            style={{ backgroundColor: (mark.attrs?.color as string) || undefined, color: 'inherit' }}
+          >
+            {acc}
+          </mark>
+        );
       default:
         return acc;
     }
   }, text);
 }
 
+function textAlignStyle(node: TiptapNode): React.CSSProperties | undefined {
+  const align = node.attrs?.textAlign as string | undefined;
+  return align && align !== 'left' ? { textAlign: align as React.CSSProperties['textAlign'] } : undefined;
+}
+
 function renderNode(node: TiptapNode, index: number): React.ReactNode {
   switch (node.type) {
     case 'paragraph':
       return (
-        <p key={index} className="mb-4 leading-relaxed text-gray-800">
+        <p key={index} className="mb-4 leading-relaxed text-gray-800" style={textAlignStyle(node)}>
           {node.content?.map((child, i) => renderNode(child, i))}
         </p>
       );
@@ -69,11 +99,59 @@ function renderNode(node: TiptapNode, index: number): React.ReactNode {
             ? 'text-2xl font-bold'
             : 'text-xl font-semibold';
       return (
-        <Tag key={index} className={`${sizeClass} mb-4 mt-8 text-gray-900`}>
+        <Tag key={index} className={`${sizeClass} mb-4 mt-8 text-gray-900`} style={textAlignStyle(node)}>
           {node.content?.map((child, i) => renderNode(child, i))}
         </Tag>
       );
     }
+
+    case 'codeBlock':
+      return (
+        <pre key={index} className="my-4 overflow-x-auto rounded-md bg-gray-800 p-4 text-sm text-gray-100">
+          <code>{node.content?.map((child) => child.text).join('')}</code>
+        </pre>
+      );
+
+    case 'taskList':
+      return (
+        <ul key={index} className="mb-4 list-none space-y-1 pl-1">
+          {node.content?.map((child, i) => renderNode(child, i))}
+        </ul>
+      );
+
+    case 'taskItem':
+      return (
+        <li key={index} className="flex items-start gap-2 text-gray-800">
+          <input type="checkbox" checked={Boolean(node.attrs?.checked)} readOnly className="mt-1.5" />
+          <span>{node.content?.map((child, i) => renderNode(child, i))}</span>
+        </li>
+      );
+
+    case 'table':
+      return (
+        <div key={index} className="my-4 overflow-x-auto">
+          <table className="w-full border-collapse">
+            <tbody>{node.content?.map((child, i) => renderNode(child, i))}</tbody>
+          </table>
+        </div>
+      );
+
+    case 'tableRow':
+      return <tr key={index}>{node.content?.map((child, i) => renderNode(child, i))}</tr>;
+
+    case 'tableHeader':
+      return (
+        <th key={index} className="border border-gray-300 bg-gray-50 p-2 text-left font-semibold">
+          {node.content?.map((child, i) => renderNode(child, i))}
+        </th>
+      );
+
+    case 'tableCell':
+      return (
+        <td key={index} className="border border-gray-300 p-2 align-top">
+          {node.content?.map((child, i) => renderNode(child, i))}
+        </td>
+      );
 
     case 'bulletList':
       return (
@@ -111,16 +189,26 @@ function renderNode(node: TiptapNode, index: number): React.ReactNode {
 
     case 'image': {
       const alt = (node.attrs?.alt as string) || '';
+      const caption = (node.attrs?.title as string) || '';
+      const width = node.attrs?.width as string | undefined;
+      const align = (node.attrs?.align as string) || 'left';
+      const figureStyle: React.CSSProperties = width ? { width } : {};
+      if (align === 'center') {
+        figureStyle.marginLeft = 'auto';
+        figureStyle.marginRight = 'auto';
+      } else if (align === 'right') {
+        figureStyle.marginLeft = 'auto';
+      }
       return (
-        <figure key={index} className="my-6">
+        <figure key={index} className="my-6" style={figureStyle}>
           <img
             src={node.attrs?.src as string}
             alt={alt}
             className="w-full rounded-lg"
           />
-          {alt && (
+          {caption && (
             <figcaption className="mt-2 text-center text-sm text-gray-500">
-              {alt}
+              {caption}
             </figcaption>
           )}
         </figure>

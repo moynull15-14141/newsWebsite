@@ -59,6 +59,7 @@ async function main() {
     { name: 'article.review', description: 'Review articles for publication' },
     { name: 'article.publish', description: 'Publish articles to the platform' },
     { name: 'article.delete', description: 'Delete articles from the platform' },
+    { name: 'audit.read', description: 'View the editorial audit trail for articles' },
     { name: 'media.upload', description: 'Upload media files (images, videos)' },
     { name: 'media.manage', description: 'Manage and organize media library' },
     { name: 'user.manage', description: 'Manage user accounts and roles' },
@@ -86,9 +87,9 @@ async function main() {
   console.log('\n🔗 Seeding role permissions...');
   const rolePermissionsMap: Record<string, string[]> = {
     'Super Admin': Object.keys(permissions),
-    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage'],
-    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'media.upload', 'media.manage', 'analytics.view'],
-    'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'media.upload', 'analytics.view'],
+    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage'],
+    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view'],
+    'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'audit.read', 'media.upload', 'analytics.view'],
     'Reporter': ['article.create', 'article.read', 'article.edit', 'media.upload'],
     'Photographer': ['article.create', 'article.read', 'media.upload', 'media.manage'],
     'Contributor': ['article.create', 'article.read'],

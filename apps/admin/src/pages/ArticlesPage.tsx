@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 import { buildArticleListQuery, getArticleActions } from '../lib/articles';
-import { Plus, Edit, Trash2, Send, Check, Globe, Archive, RotateCcw, Clock } from 'lucide-react';
+import { Plus, Edit, Trash2, Send, Check, Globe, Archive, ArchiveRestore, EyeOff, RotateCcw, Clock } from 'lucide-react';
 
 const actionIcons = {
   edit: Edit,
@@ -13,6 +13,8 @@ const actionIcons = {
   'return-to-draft': RotateCcw,
   publish: Globe,
   archive: Archive,
+  unpublish: EyeOff,
+  restore: ArchiveRestore,
   delete: Trash2,
 } as const;
 
@@ -78,6 +80,12 @@ export default function ArticlesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['articles'] }),
   });
 
+  const returnToDraftMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      apiFetch(`/articles/${id}/return-to-draft`, { method: 'POST', body: JSON.stringify({ reason: reason || undefined }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['articles'] }),
+  });
+
   const handleAction = (article: Article, action: string) => {
     if (action === 'edit') {
       navigate(`/articles/${article.id}/edit`);
@@ -85,6 +93,10 @@ export default function ArticlesPage() {
       if (confirm('Are you sure you want to delete this article?')) {
         deleteMutation.mutate(article.id);
       }
+    } else if (action === 'return-to-draft') {
+      const reason = window.prompt('Why is this being sent back? The author will see this reason.');
+      if (reason === null) return; // cancelled
+      returnToDraftMutation.mutate({ id: article.id, reason });
     } else {
       workflowMutation.mutate({ id: article.id, action });
     }
@@ -105,9 +117,9 @@ export default function ArticlesPage() {
         )}
       </div>
 
-      {(workflowMutation.isError || deleteMutation.isError) && (
+      {(workflowMutation.isError || deleteMutation.isError || returnToDraftMutation.isError) && (
         <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {getApiErrorMessage(workflowMutation.error ?? deleteMutation.error, 'Action failed. Please try again.')}
+          {getApiErrorMessage(workflowMutation.error ?? deleteMutation.error ?? returnToDraftMutation.error, 'Action failed. Please try again.')}
         </p>
       )}
 

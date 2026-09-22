@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from './api';
-import { ApiError, getApiErrorMessage, isApiError, isDraftConflict, parseApiError } from './api-error';
+import { ApiError, getApiErrorMessage, isApiError, isArticleVersionConflict, isDraftConflict, parseApiError } from './api-error';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -21,6 +21,17 @@ describe('parseApiError', () => {
     expect(isDraftConflict(parseApiError(409, JSON.stringify({ message: 'Slug already exists' })))).toBe(false);
     expect(isDraftConflict(parseApiError(400, JSON.stringify({ code: 'HOMEPAGE_DRAFT_CONFLICT', message: 'x' })))).toBe(false);
     expect(isDraftConflict(new Error('HOMEPAGE_DRAFT_CONFLICT'))).toBe(false);
+  });
+
+  it('parses an article version conflict (409 + ARTICLE_VERSION_CONFLICT)', () => {
+    const error = parseApiError(409, JSON.stringify({ code: 'ARTICLE_VERSION_CONFLICT', message: 'This article was changed by another user.' }));
+    expect(isArticleVersionConflict(error)).toBe(true);
+    expect(isDraftConflict(error)).toBe(false);
+  });
+
+  it('does not treat other 409s as an article version conflict', () => {
+    expect(isArticleVersionConflict(parseApiError(409, JSON.stringify({ message: 'Slug already exists' })))).toBe(false);
+    expect(isArticleVersionConflict(parseApiError(400, JSON.stringify({ code: 'ARTICLE_VERSION_CONFLICT', message: 'x' })))).toBe(false);
   });
 
   it('parses structured 422 validation issues', () => {

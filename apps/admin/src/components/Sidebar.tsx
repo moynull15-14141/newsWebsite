@@ -1,10 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2, SearchCheck, X } from 'lucide-react';
+import { LayoutDashboard, FileText, ClipboardCheck, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2, SearchCheck, X } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
 const menuItems: Array<{ label: string; href: string; icon: typeof LayoutDashboard; permission?: string }> = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
   { label: 'Articles', href: '/articles', icon: FileText },
+  { label: 'Review Queue', href: '/review', icon: ClipboardCheck, permission: 'article.review' },
   { label: 'Media', href: '/media', icon: ImageIcon },
   { label: 'Comments', href: '/comments', icon: MessageCircle },
   { label: 'Ads', href: '/ads', icon: Megaphone },

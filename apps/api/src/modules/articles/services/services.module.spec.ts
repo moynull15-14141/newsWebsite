@@ -5,7 +5,6 @@ import { BreakingNewsService } from './breaking-news.service';
 import { ArticleViewService } from './article-view.service';
 import { TrendingService } from './trending.service';
 import { MostReadService } from './most-read.service';
-import { ArticleRevisionService } from './article-revision.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
@@ -65,8 +64,4 @@ describe('ServicesModule', () => {
     expect(service).toBeInstanceOf(MostReadService);
   });
 
-  it('should export ArticleRevisionService', () => {
-    const service = module.get<ArticleRevisionService>(ArticleRevisionService);
-    expect(service).toBeInstanceOf(ArticleRevisionService);
-  });
 });

@@ -11,7 +11,7 @@
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:e2e:aiven": "jest --runInBand --testRegex public.aiven-e2e.ts$",
+    "test:e2e:aiven": "jest --runInBand --testRegex \\.aiven-e2e\\.ts$",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
   },
