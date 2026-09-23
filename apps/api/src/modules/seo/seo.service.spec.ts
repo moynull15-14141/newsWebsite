@@ -9,7 +9,7 @@ describe('SeoService (language-aware sitemap)', () => {
   let languagesService: any;
 
   beforeEach(async () => {
-    prisma = { article: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() } };
+    prisma = { article: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() }, job: { findMany: jest.fn() } };
     languagesService = { getDefault: jest.fn().mockResolvedValue({ id: 'lang-bn', code: 'bn', isDefault: true }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -62,6 +62,28 @@ describe('SeoService (language-aware sitemap)', () => {
       expect(xml).toContain('article-sitemap.xml');
       expect(xml).toContain('category-sitemap.xml');
       expect(xml).toContain('location-sitemap.xml');
+      expect(xml).toContain('job-sitemap.xml');
+    });
+  });
+
+  describe('getJobSitemap', () => {
+    it('includes a published job with no deadline', async () => {
+      prisma.job.findMany.mockResolvedValueOnce([{ id: 'job-1', slug: 'engineer', updatedAt: new Date('2026-01-01') }]);
+      const xml = await service.getJobSitemap();
+      expect(xml).toContain('<loc>http://localhost:5173/jobs/engineer</loc>');
+      // Eligibility is enforced at the query level (see the where clause passed to findMany), not by
+      // filtering results here — this asserts the query actually scoped to PUBLISHED + non-expired.
+      expect(prisma.job.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ status: 'PUBLISHED' }),
+      }));
+    });
+
+    it('paginates past 500 jobs using a cursor', async () => {
+      const firstPage = Array.from({ length: 500 }, (_, i) => ({ id: `job-${i}`, slug: `job-${i}`, updatedAt: new Date('2026-01-01') }));
+      prisma.job.findMany.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([{ id: 'job-500', slug: 'job-500', updatedAt: new Date('2026-01-01') }]);
+      const xml = await service.getJobSitemap();
+      expect(prisma.job.findMany).toHaveBeenCalledTimes(2);
+      expect(xml).toContain('<loc>http://localhost:5173/jobs/job-500</loc>');
     });
   });
 

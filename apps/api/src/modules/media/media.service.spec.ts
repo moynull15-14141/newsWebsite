@@ -25,11 +25,17 @@ describe('MediaService', () => {
     createdAt: new Date(),
   };
 
+  // Real magic bytes, not just a claimed mimetype — hasValidImageSignature() checks the file's own
+  // leading bytes, so every upload test needs a buffer that actually looks like the format it claims.
+  const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+  const WEBP_SIGNATURE = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP')]);
+
   const mockFile = {
     originalname: 'test.jpg',
     mimetype: 'image/jpeg',
     size: 1024,
-    buffer: Buffer.from('test'),
+    buffer: JPEG_SIGNATURE,
   } as Express.Multer.File;
 
   const mockStorage: StorageProvider = {
@@ -113,6 +119,40 @@ describe('MediaService', () => {
       expect(keys[0]).not.toBe(keys[1]);
       // Server-generated, never the raw original filename — the actual collision-avoidance mechanism.
       expect(keys[0]).toMatch(/^media\/[a-z0-9]+-[a-z0-9]+\.jpg$/);
+    });
+
+    it('rejects a file whose bytes do not match its claimed MIME type (spoofed Content-Type)', async () => {
+      // Renamed/relabeled non-image (e.g. a script) claiming to be a JPEG via Content-Type alone.
+      const spoofed = { ...mockFile, mimetype: 'image/jpeg', buffer: Buffer.from('<script>alert(1)</script>') };
+
+      await expect(service.upload(spoofed, 'u1', {})).rejects.toThrow(BadRequestException);
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('accepts a real PNG signature claimed as image/png', async () => {
+      prisma.media.create.mockResolvedValue(mockMedia);
+      const png = { ...mockFile, mimetype: 'image/png', buffer: PNG_SIGNATURE };
+
+      await expect(service.upload(png, 'u1', {})).resolves.toBeDefined();
+    });
+
+    it('accepts a real WEBP signature claimed as image/webp', async () => {
+      prisma.media.create.mockResolvedValue(mockMedia);
+      const webp = { ...mockFile, mimetype: 'image/webp', buffer: WEBP_SIGNATURE };
+
+      await expect(service.upload(webp, 'u1', {})).resolves.toBeDefined();
+    });
+
+    it('rejects a PNG-signed file claiming to be a JPEG (mismatched signature/mimetype pair)', async () => {
+      const mismatched = { ...mockFile, mimetype: 'image/jpeg', buffer: PNG_SIGNATURE };
+
+      await expect(service.upload(mismatched, 'u1', {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects an empty or truncated buffer', async () => {
+      const empty = { ...mockFile, buffer: Buffer.alloc(0) };
+
+      await expect(service.upload(empty, 'u1', {})).rejects.toThrow(BadRequestException);
     });
 
     it('derives the extension from the validated MIME type, not the (unsanitized) original filename', async () => {

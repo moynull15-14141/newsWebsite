@@ -17,6 +17,7 @@ export class SeoController {
   @Public() @Get('author-sitemap.xml') @Header('Content-Type', 'application/xml; charset=utf-8') authors() { return this.seoService.getAuthorSitemap(); }
   @Public() @Get('location-sitemap.xml') @Header('Content-Type', 'application/xml; charset=utf-8') locations() { return this.seoService.getLocationSitemap(); }
   @Public() @Get('news-sitemap.xml') @Header('Content-Type', 'application/xml; charset=utf-8') news() { return this.seoService.getNewsSitemap(); }
+  @Public() @Get('job-sitemap.xml') @Header('Content-Type', 'application/xml; charset=utf-8') jobs() { return this.seoService.getJobSitemap(); }
   @Get('health') @UseGuards(JwtAuthGuard, RolesGuard) @RequirePermissions('analytics.view') health() { return this.seoService.getSiteHealth(); }
   @Get('articles/:id') @UseGuards(JwtAuthGuard, RolesGuard) @RequirePermissions('article.read') analyze(@Param('id') id: string) { return this.seoService.analyzeArticle(id); }
 }

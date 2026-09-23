@@ -46,6 +46,7 @@ describe('PublicService', () => {
       tag: { findUnique: jest.fn(), findFirst: jest.fn() },
       user: { findUnique: jest.fn() },
       location: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
+      articleRelated: { findMany: jest.fn().mockResolvedValue([]) },
       // Homepage snapshot loader: no ACTIVE configuration -> dynamic fallback (configured paths are covered in public-homepage.spec.ts).
       $transaction: jest.fn((fn: (tx: any) => unknown) => fn({ homepageConfiguration: { findUnique: jest.fn().mockResolvedValue(null) }, homepageSection: { findMany: jest.fn() } })),
     };
@@ -437,11 +438,24 @@ describe('PublicService', () => {
       expect(prisma.article.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            id: { not: '1' },
+            id: { notIn: ['1'] },
             status: 'PUBLISHED',
           }),
         }),
       );
+    });
+
+    it('returns eligible manual stories first and removes them from automatic results', async () => {
+      const manual = { ...mockArticle, id: 'manual', slug: 'manual' };
+      const automatic = { ...mockArticle, id: 'auto', slug: 'auto' };
+      prisma.articleRelated.findMany.mockResolvedValue([{ relatedArticle: manual }]);
+      prisma.article.findMany.mockResolvedValue([automatic]);
+      const result = await service.getRelatedArticles('1', 'c1', [], 'l1');
+      expect(result.map((article) => article.id)).toEqual(['manual', 'auto']);
+      expect(prisma.article.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ id: { notIn: ['1', 'manual'] } }),
+        take: 4,
+      }));
     });
   });
 });

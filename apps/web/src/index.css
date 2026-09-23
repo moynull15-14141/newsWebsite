@@ -3,6 +3,44 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark-mode remap for the gray/neutral scale. This has to list every shade the app actually uses
+     (checked against `grep -roh` of the component/page source) rather than just the few that were
+     visible in the pages first tested — a heading or card using an unlisted shade (e.g. text-neutral-800,
+     the article-card title color) falls through to its light-mode color unchanged, which on the dark
+     background reads as near-invisible dark-on-dark text. Every entry below maps a "dark ink on light
+     paper" shade to a "light ink on dark paper" shade of matching contrast weight.
+     Plain `color`/`background-color`/`border-color` declarations, not `@apply`, throughout this block:
+     with this many overlapping selector groups (a shade used as both an @apply target and a selector
+     elsewhere), Tailwind's own circular-@apply guard trips on false positives — raw `theme()` values
+     sidestep that checker entirely while producing the identical CSS. */
+  .dark body { background-color: theme('colors.neutral.950'); color: theme('colors.neutral.100'); }
+  .dark .bg-white { background-color: theme('colors.neutral.900'); }
+  .dark .bg-neutral-50, .dark .bg-gray-50,
+  .dark .bg-neutral-100, .dark .bg-gray-100 { background-color: theme('colors.neutral.950'); }
+  .dark .bg-neutral-200, .dark .bg-gray-200,
+  .dark .bg-neutral-300, .dark .bg-gray-300 { background-color: theme('colors.neutral.800'); }
+
+  /* Headline/body ink, darkest to lightest in light mode -> lightest to darkest-but-still-legible in dark mode. */
+  .dark .text-gray-950, .dark .text-neutral-950,
+  .dark .text-gray-900, .dark .text-neutral-900,
+  .dark .text-gray-800, .dark .text-neutral-800 { color: theme('colors.neutral.100'); }
+  .dark .text-gray-700, .dark .text-neutral-700 { color: theme('colors.neutral.300'); }
+  .dark .text-gray-600, .dark .text-neutral-600,
+  .dark .text-gray-500, .dark .text-neutral-500 { color: theme('colors.neutral.400'); }
+  .dark .text-gray-400, .dark .text-neutral-400 { color: theme('colors.neutral.500'); }
+
+  .dark .border-gray-100, .dark .border-neutral-100,
+  .dark .border-gray-200, .dark .border-neutral-200 { border-color: theme('colors.neutral.700'); }
+  .dark .border-gray-300, .dark .border-neutral-300 { border-color: theme('colors.neutral.600'); }
+  .dark input, .dark textarea, .dark select {
+    border-color: theme('colors.neutral.600');
+    background-color: theme('colors.neutral.900');
+    color: theme('colors.neutral.100');
+  }
+  .dark img { filter: brightness(0.95); }
+}
+
+@layer base {
   body {
     @apply bg-white text-gray-900 antialiased;
     font-family: 'Inter', 'Hind Siliguri', system-ui, sans-serif;
@@ -208,5 +246,55 @@
   
   .error-state-action {
     @apply inline-flex items-center px-4 py-2 bg-neutral-100 text-neutral-800 rounded font-medium hover:bg-neutral-200 transition-colors duration-200;
+  }
+}
+
+/*
+ * Breaking News ticker (Phase 2L, revised per live feedback) — a single continuous strip instead of
+ * one headline finishing its whole pass before the next begins. That one-at-a-time version had two
+ * real problems: with 4-5 items it read as sparse/boring since only one was ever on screen, and the
+ * "advance to next item" logic ran off the CSS animationend event — anything that interrupted the
+ * animation (a hover pause, the tab losing focus) meant the next item never appeared. A single
+ * infinite CSS animation with no per-item completion event to depend on can't get stuck that way.
+ *
+ * Technique: all active items render twice back-to-back in one flex row (`.bn-ticker-track-inner`),
+ * and the row animates `transform: translateX(-50% → 0%)` — exactly one copy's width, always, however
+ * many items there are or however wide the container is. That makes the two copies seamlessly
+ * indistinguishable at the loop boundary, and because the row moves in the positive X direction it
+ * reads as LEFT → RIGHT: content that was off-screen past the left edge continuously scrolls into view
+ * and exits past the right edge — the "enters from left, moves right" requirement, sustained
+ * continuously rather than as a single one-shot pass.
+ */
+@keyframes bn-track-scroll {
+  from { transform: translateX(-50%); }
+  to { transform: translateX(0%); }
+}
+
+.bn-ticker-track-inner {
+  animation-name: bn-track-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/*
+ * Each item is its own colored chip (so different items can have completely different admin-chosen
+ * colors/gradients side by side) with a soft mask fade at both edges, so a chip's color doesn't cut in
+ * or out abruptly — it gradually reveals as it scrolls in and gradually fades as it scrolls out, which
+ * also means two adjacent chips' colors cross-fade through each other in the gap between them instead
+ * of switching instantly.
+ */
+.bn-ticker-chip {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+}
+
+.bn-ticker-track:hover .bn-ticker-track-inner,
+.bn-ticker-track:focus-within .bn-ticker-track-inner {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bn-ticker-track-inner {
+    animation: none !important;
   }
 }

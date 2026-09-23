@@ -29,8 +29,13 @@ export default function HomePage() {
   const { hero, briefs, secondary, ranked } = selectHomepageStories(data);
   const sections = selectHomepageSections(data);
   const sectionUsed = new Set(hero ? [hero.id] : []);
+  const pageTitle = code === 'bn' ? 'বাংলাদেশ ও বিশ্বের সর্বশেষ সংবাদ' : 'Latest Bangladesh and world news';
 
-  return <><SeoHead title={code === 'bn' ? 'বাংলাদেশ ও বিশ্বের সর্বশেষ সংবাদ' : 'Latest Bangladesh and world news'} description={code === 'bn' ? 'বাংলাদেশ ও বিশ্বের সর্বশেষ সংবাদ, প্রতিবেদন ও বিশ্লেষণ।' : 'Latest Bangladesh and world news, reporting and analysis.'} alternates={[{ code: 'bn', url: '/' }, { code: 'en', url: '/en' }]} /><Container className="py-6 lg:py-8">
+  return <><SeoHead title={pageTitle} description={code === 'bn' ? 'বাংলাদেশ ও বিশ্বের সর্বশেষ সংবাদ, প্রতিবেদন ও বিশ্লেষণ।' : 'Latest Bangladesh and world news, reporting and analysis.'} alternates={[{ code: 'bn', url: '/' }, { code: 'en', url: '/en' }]} /><Container className="py-6 lg:py-8">
+    {/* The masthead logo is a styled <span>, not a heading, so the homepage otherwise has zero <h1> —
+      * visually hidden since the logo already carries this visually, but every page needs exactly one
+      * real <h1> for screen reader users and document outline. */}
+    <h1 className="sr-only">{pageTitle}</h1>
     {hero ? <section aria-label={t('common.topStories')} className="grid gap-7 border-b border-neutral-300 pb-8 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] lg:grid-cols-[14rem_minmax(0,2fr)_17rem] lg:gap-8">
       <div className="order-2 lg:order-1"><BriefList title={t('common.latest')} articles={briefs} /></div>
       <div className="order-1 lg:order-2"><LeadStory article={hero} /></div>

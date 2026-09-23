@@ -22,8 +22,11 @@ import { HomepageModule } from './modules/homepage/homepage.module';
 import { EditorialModule } from './modules/editorial/editorial.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { RateLimitGuard } from './common/rate-limit/rate-limit.guard';
 import { SeoModule } from './modules/seo/seo.module';
 import { LanguagesModule } from './modules/languages/languages.module';
+import { BreakingNewsModule } from './modules/breaking-news/breaking-news.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 
 @Module({
   imports: [
@@ -52,10 +55,14 @@ import { LanguagesModule } from './modules/languages/languages.module';
     EditorialModule,
     SeoModule,
     LanguagesModule,
+    BreakingNewsModule,
+    JobsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Runs last, so only requests already authenticated and authorized reach it — throttling, not access control.
+    { provide: APP_GUARD, useClass: RateLimitGuard },
   ],
 })
 export class AppModule {}

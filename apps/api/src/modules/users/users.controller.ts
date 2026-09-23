@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { parsePage, parsePositiveInt, DEFAULT_LIMIT, MAX_LIMIT } from '../../common/pagination/parse-pagination';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -43,8 +44,8 @@ export class UsersController {
     @Query('status') status?: string,
   ) {
     return this.usersService.findAll({
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: page ? parsePage(page) : undefined,
+      limit: limit ? parsePositiveInt(limit, DEFAULT_LIMIT, MAX_LIMIT) : undefined,
       search,
       roleId,
       status,

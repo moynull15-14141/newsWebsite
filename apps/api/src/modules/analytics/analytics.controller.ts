@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { parsePositiveInt } from '../../common/pagination/parse-pagination';
 
 class TrackAnalyticsEventDto {
   @IsIn(['ARTICLE_SHARE', 'SEARCH', 'CATEGORY_VIEW', 'LOCATION_VIEW'])
@@ -40,27 +41,27 @@ export class AnalyticsController {
   @Get('overview')
   @RequirePermissions('analytics.view')
   getOverview(@Query('days') days?: string) {
-    return this.analyticsService.getOverview(days ? parseInt(days) : 30);
+    return this.analyticsService.getOverview(parsePositiveInt(days, 30, 365));
   }
 
   @Get('top-content')
   @RequirePermissions('analytics.view')
   getTopContent(@Query('days') days?: string, @Query('limit') limit?: string) {
     return this.analyticsService.getTopContent(
-      days ? parseInt(days) : 30,
-      limit ? parseInt(limit) : 10,
+      parsePositiveInt(days, 30, 365),
+      parsePositiveInt(limit, 10, 100),
     );
   }
 
   @Get('top-categories')
   @RequirePermissions('analytics.view')
   getTopCategories(@Query('limit') limit?: string) {
-    return this.analyticsService.getTopCategories(limit ? parseInt(limit) : 10);
+    return this.analyticsService.getTopCategories(parsePositiveInt(limit, 10, 100));
   }
 
   @Get('top-locations')
   @RequirePermissions('analytics.view')
   getTopLocations(@Query('limit') limit?: string) {
-    return this.analyticsService.getTopLocations(limit ? parseInt(limit) : 10);
+    return this.analyticsService.getTopLocations(parsePositiveInt(limit, 10, 100));
   }
 }

@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, ClipboardCheck, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2, SearchCheck, X } from 'lucide-react';
+import { LayoutDashboard, FileText, ClipboardCheck, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings, MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2, SearchCheck, X, Radio, Briefcase, FolderKanban, Building2 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
 const menuItems: Array<{ label: string; href: string; icon: typeof LayoutDashboard; permission?: string }> = [
@@ -12,7 +12,12 @@ const menuItems: Array<{ label: string; href: string; icon: typeof LayoutDashboa
   { label: 'Analytics', href: '/analytics', icon: BarChart3 },
   { label: 'SEO Intelligence', href: '/seo', icon: SearchCheck, permission: 'analytics.view' },
   { label: 'Homepage', href: '/homepage', icon: LayoutTemplate, permission: 'homepage.manage' },
+  { label: 'Breaking News', href: '/breaking-news', icon: Radio, permission: 'breaking_news.manage' },
   { label: 'Collections', href: '/collections', icon: Layers },
+  { label: 'Jobs', href: '/jobs', icon: Briefcase, permission: 'job.read' },
+  { label: 'Job Categories', href: '/jobs/categories', icon: FolderKanban, permission: 'job.manage_categories' },
+  { label: 'Employers', href: '/jobs/employers', icon: Building2, permission: 'job.manage_employers' },
+  { label: 'Job Applications', href: '/jobs/applications', icon: Users, permission: 'job_application.view' },
   { label: 'Categories', href: '/categories', icon: FolderOpen },
   { label: 'Tags', href: '/tags', icon: Tag },
   { label: 'Locations', href: '/locations', icon: MapPin },

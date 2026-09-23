@@ -14,11 +14,22 @@ interface DashboardStats {
   publishedToday: number;
   drafts: number;
   inReview: number;
+  approved: number;
+  archived: number;
   scheduled: number;
   breaking: number;
   viewsToday: number;
   mostRead: Article[];
+  myDrafts: DashboardArticle[];
+  myAssigned: DashboardArticle[];
+  recentlyUpdated: DashboardArticle[];
+  recentlyPublished: DashboardArticle[];
+  scheduledPublishing: DashboardArticle[];
+  breakingActivity: BreakingActivity[];
 }
+
+interface DashboardArticle extends Article { status: string; updatedAt?: string; scheduledAt?: string; }
+interface BreakingActivity { id: string; headline: string; isActive: boolean; updatedAt: string; }
 
 interface EngagementStats {
   totalComments: number;
@@ -57,6 +68,8 @@ export default function DashboardPage() {
     { label: 'Published Today', value: stats?.publishedToday ?? 0, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
     { label: 'Drafts', value: stats?.drafts ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50' },
     { label: 'In Review', value: stats?.inReview ?? 0, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
+    { label: 'Approved', value: stats?.approved ?? 0, icon: CheckCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Archived', value: stats?.archived ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50' },
     { label: 'Scheduled', value: stats?.scheduled ?? 0, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Breaking News', value: stats?.breaking ?? 0, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
     { label: 'Views Today', value: stats?.viewsToday ?? 0, icon: Eye, color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -70,6 +83,27 @@ export default function DashboardPage() {
         <BarChart3 className="h-6 w-6 text-primary-500" />
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
       </div>
+
+      {stats && (
+        <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <ArticlePanel title="My Drafts" articles={stats.myDrafts} />
+          <ArticlePanel title="My Assigned Articles" articles={stats.myAssigned} />
+          <ArticlePanel title="Recently Updated" articles={stats.recentlyUpdated} />
+          <ArticlePanel title="Recently Published" articles={stats.recentlyPublished} />
+          <ArticlePanel title="Scheduled Publishing" articles={stats.scheduledPublishing} />
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 className="font-semibold text-gray-900">Breaking News Activity</h2>
+            <div className="mt-3 divide-y divide-gray-100">
+              {stats.breakingActivity.length ? stats.breakingActivity.map((item) => (
+                <a key={item.id} href="/breaking-news" className="flex items-center justify-between gap-3 py-2 text-sm hover:text-primary-600">
+                  <span className="truncate">{item.headline}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${item.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{item.isActive ? 'Active' : 'Inactive'}</span>
+                </a>
+              )) : <p className="py-3 text-sm text-gray-500">No breaking-news activity.</p>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {statCards.map((card) => (
@@ -121,6 +155,22 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ArticlePanel({ title, articles }: { title: string; articles: DashboardArticle[] }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="font-semibold text-gray-900">{title}</h2>
+      <div className="mt-3 divide-y divide-gray-100">
+        {articles.length ? articles.map((article) => (
+          <a key={article.id} href={`/articles/${article.id}/edit`} className="flex items-center justify-between gap-3 py-2 text-sm hover:text-primary-600">
+            <span className="truncate">{article.title}</span>
+            <span className="shrink-0 text-xs text-gray-500">{article.status}</span>
+          </a>
+        )) : <p className="py-3 text-sm text-gray-500">No articles.</p>}
+      </div>
     </div>
   );
 }

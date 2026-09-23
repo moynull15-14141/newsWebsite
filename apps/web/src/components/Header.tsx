@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { localizedField } from '@/lib/localize';
 import { buildSearchUrl } from '@/lib/search-url';
-import { Menu, X, Search, AlertTriangle, UserRound, Bell } from 'lucide-react';
+import { Menu, X, Search, AlertTriangle, UserRound, Bell, ChevronDown, LogOut } from 'lucide-react';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
@@ -20,6 +20,7 @@ import { useLanguage } from '@/lib/i18n';
 const FIXED_NAV = [
   { labelKey: 'common.latest', href: '/latest' },
   { labelKey: 'nav.bangladesh', href: '/bangladesh' },
+  { labelKey: 'nav.jobs', href: '/jobs' },
 ] as const;
 
 /** Nav item count from real categories, capped so the desktop bar never overflows (Part 16). Editors
@@ -72,6 +73,7 @@ function LanguageSwitcher() {
 export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
@@ -79,6 +81,31 @@ export default function Header() {
   const { code, t, pathFor } = useLanguage();
   const controlLabels = getHeaderControlLabels(searchOpen, mobileOpen);
   const link = (path: string) => pathFor(path, code);
+
+  // Keyboard users expect Escape to dismiss an open panel without hunting for the toggle button again.
+  useEffect(() => {
+    if (!searchOpen && !mobileOpen && !accountOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSearchOpen(false);
+        setMobileOpen(false);
+        setAccountOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [searchOpen, mobileOpen, accountOpen]);
+
+  const logout = async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } finally {
+      useReaderAuthStore.getState().clearAuth();
+      setAccountOpen(false);
+      setMobileOpen(false);
+      navigate(link('/'));
+    }
+  };
 
   const { data: breakingNews } = useQuery<BreakingArticle[]>({
     queryKey: ['breaking-news'],
@@ -164,13 +191,47 @@ export default function Header() {
             >
               <Search size={20} />
             </IconButton>
-            <Link
-              to={link(user ? '/account' : '/login')}
-              className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-200"
-              aria-label={user ? t('common.account') : t('common.signIn')}
-            >
-              <UserRound size={19} />
-            </Link>
+            {!user ? (
+              <div className="hidden items-center gap-2 sm:flex">
+                <Link to={link('/login')} className="rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100">
+                  {t('common.signIn')}
+                </Link>
+                <Link to={link('/register')} className="rounded bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600">
+                  {t('auth.register')}
+                </Link>
+              </div>
+            ) : (
+              <div className="relative hidden sm:block">
+                <button
+                  type="button"
+                  onClick={() => setAccountOpen((open) => !open)}
+                  aria-expanded={accountOpen}
+                  aria-controls="reader-account-menu"
+                  className="flex items-center gap-2 rounded-full border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-600"
+                >
+                  <UserRound size={18} />
+                  <span className="max-w-32 truncate">{user.name}</span>
+                  <ChevronDown size={15} />
+                </button>
+                {accountOpen && (
+                  <nav id="reader-account-menu" aria-label={t('common.account')} className="absolute right-0 mt-2 w-52 rounded-lg border border-neutral-200 bg-white p-2 shadow-lg">
+                    {[
+                      ['/account', t('common.account')],
+                      ['/account/profile', t('account.profile')],
+                      ['/account/saved', t('account.savedArticles')],
+                      ['/account/saved-jobs', t('jobs.savedJobs')],
+                      ['/account/applications', t('jobs.myApplications')],
+                      ['/account/settings', t('account.settings')],
+                    ].map(([href, label]) => (
+                      <Link key={href} to={link(href)} onClick={() => setAccountOpen(false)} className="block rounded px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100">{label}</Link>
+                    ))}
+                    <button type="button" onClick={logout} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50">
+                      <LogOut size={16} /> Logout
+                    </button>
+                  </nav>
+                )}
+              </div>
+            )}
             {user && (
               <Link
                 to={link('/account/notifications')}
@@ -180,6 +241,14 @@ export default function Header() {
                 <Bell size={19} />
               </Link>
             )}
+
+            <Link
+              to={link(user ? '/account' : '/login')}
+              className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 sm:hidden"
+              aria-label={user ? t('common.account') : t('common.signIn')}
+            >
+              <UserRound size={19} />
+            </Link>
 
             <IconButton
               variant="default"
@@ -230,6 +299,24 @@ export default function Header() {
                 {item.label}
               </Link>
             ))}
+            <div className="mt-3 border-t border-neutral-200 pt-3">
+              {user ? (
+                <>
+                  <Link to={link('/account')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 font-semibold text-primary-600">{t('common.account')}</Link>
+                  <Link to={link('/account/profile')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 text-neutral-700">{t('account.profile')}</Link>
+                  <Link to={link('/account/saved')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 text-neutral-700">{t('account.savedArticles')}</Link>
+                  <Link to={link('/account/saved-jobs')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 text-neutral-700">{t('jobs.savedJobs')}</Link>
+                  <Link to={link('/account/applications')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 text-neutral-700">{t('jobs.myApplications')}</Link>
+                  <Link to={link('/account/settings')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 text-neutral-700">{t('account.settings')}</Link>
+                  <button type="button" onClick={logout} className="w-full rounded px-3 py-2.5 text-left font-semibold text-red-600">Logout</button>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 px-3">
+                  <Link to={link('/login')} onClick={() => setMobileOpen(false)} className="rounded border border-neutral-300 px-3 py-2 text-center font-semibold">{t('common.signIn')}</Link>
+                  <Link to={link('/register')} onClick={() => setMobileOpen(false)} className="rounded bg-primary-500 px-3 py-2 text-center font-semibold text-white">{t('auth.register')}</Link>
+                </div>
+              )}
+            </div>
         </nav>
       </div>
     </header>

@@ -54,6 +54,11 @@ describe('ArticlesService', () => {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
+      articleRelated: {
+        findMany: jest.fn(),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
       articleRevision: {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
@@ -61,6 +66,7 @@ describe('ArticlesService', () => {
         create: jest.fn(),
       },
       language: { findUnique: jest.fn() },
+      user: { findUnique: jest.fn() },
       $transaction: jest.fn((fn: (tx: any) => unknown) => fn(prisma)),
     };
     languagesService = { getDefault: jest.fn().mockResolvedValue({ id: 'lang-bn', code: 'bn', isDefault: true }) };
@@ -78,6 +84,32 @@ describe('ArticlesService', () => {
     }).compile();
 
     service = module.get<ArticlesService>(ArticlesService);
+  });
+
+  describe('manual related stories', () => {
+    it('rejects self-reference', async () => {
+      prisma.article.findUnique.mockResolvedValue({ id: 'article-1' });
+      await expect(service.updateManualRelated('article-1', ['article-1'], 'editor-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects missing targets', async () => {
+      prisma.article.findUnique.mockResolvedValue({ id: 'article-1' });
+      prisma.article.findMany.mockResolvedValue([]);
+      await expect(service.updateManualRelated('article-1', ['11111111-1111-4111-8111-111111111111'], 'editor-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('persists order and writes an audit event', async () => {
+      const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+      prisma.article.findUnique.mockResolvedValue({ id: 'article-1' });
+      prisma.article.findMany.mockResolvedValue(ids.map((id) => ({ id })));
+      prisma.articleRelated.findMany.mockResolvedValue([]);
+      await service.updateManualRelated('article-1', ids, 'editor-1');
+      expect(prisma.articleRelated.createMany).toHaveBeenCalledWith({ data: [
+        { articleId: 'article-1', relatedArticleId: ids[0], position: 1 },
+        { articleId: 'article-1', relatedArticleId: ids[1], position: 2 },
+      ] });
+      expect(auditLog.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'RELATED_STORIES_UPDATED', actorId: 'editor-1' }));
+    });
   });
 
   describe('create', () => {
@@ -297,6 +329,24 @@ describe('ArticlesService', () => {
       ).rejects.toThrow(BadRequestException);
       expect(prisma.article.delete).not.toHaveBeenCalled();
     });
+
+    it('allows permanently deleting an ARCHIVED article with article.delete', async () => {
+      prisma.article.findUnique.mockResolvedValue({ ...mockArticle, status: 'ARCHIVED' });
+      prisma.articleTag.deleteMany.mockResolvedValue({});
+      prisma.article.delete.mockResolvedValue({});
+
+      const result = await service.remove('article-1', 'other-user', ['article.delete']);
+      expect(result.message).toBe('Article deleted successfully');
+    });
+
+    it('refuses to delete an ARCHIVED article without article.delete, even for its own author — more consequential than deleting an untouched draft', async () => {
+      prisma.article.findUnique.mockResolvedValue({ ...mockArticle, status: 'ARCHIVED' });
+
+      await expect(
+        service.remove('article-1', 'user-1', []),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.article.delete).not.toHaveBeenCalled();
+    });
   });
 
   describe('submitReview', () => {
@@ -317,6 +367,14 @@ describe('ArticlesService', () => {
       await expect(
         service.submitReview('article-1', 'other-user'),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('allows a non-author with article.publish to submit — otherwise a restored article authored by someone else has no one who can move it forward', async () => {
+      prisma.article.findUnique.mockResolvedValue(mockArticle);
+      prisma.article.update.mockResolvedValue({ ...mockArticle, status: 'IN_REVIEW' });
+
+      const result = await service.submitReview('article-1', 'other-user', ['article.publish']);
+      expect(result.status).toBe('IN_REVIEW');
     });
 
     it('blocks submitting a draft with no body content', async () => {
@@ -495,10 +553,10 @@ describe('ArticlesService', () => {
   });
 
   describe('restore', () => {
-    it('brings an archived article back to draft and clears archivedAt', async () => {
+    it('brings an archived article back to draft and clears archivedAt and publishedAt', async () => {
       prisma.article.findUnique
-        .mockResolvedValueOnce({ ...mockArticle, status: 'ARCHIVED', archivedAt: new Date() })
-        .mockResolvedValueOnce({ ...mockArticle, status: 'DRAFT', archivedAt: null });
+        .mockResolvedValueOnce({ ...mockArticle, status: 'ARCHIVED', archivedAt: new Date(), publishedAt: new Date() })
+        .mockResolvedValueOnce({ ...mockArticle, status: 'DRAFT', archivedAt: null, publishedAt: null });
       prisma.article.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.restore('article-1', 'user-1');
@@ -506,7 +564,10 @@ describe('ArticlesService', () => {
       expect(prisma.article.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'article-1', status: 'ARCHIVED' },
-          data: expect.objectContaining({ status: 'DRAFT', archivedAt: null }),
+          // publishedAt must be cleared too, not just archivedAt — otherwise a restored article sits in
+          // DRAFT while still carrying a stale publish timestamp from its previous life (the exact bug
+          // report this test guards against: "restored article can't be drafted/published again").
+          data: expect.objectContaining({ status: 'DRAFT', archivedAt: null, publishedAt: null }),
         }),
       );
       expect(auditLog.record).toHaveBeenCalledWith(
@@ -569,6 +630,68 @@ describe('ArticlesService', () => {
       await expect(
         service.returnToDraft('article-1', 'user-1'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('assign', () => {
+    it('assigns an article to an active user and records assignedAt', async () => {
+      prisma.article.findUnique.mockResolvedValue(mockArticle);
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-2', status: 'ACTIVE' });
+      prisma.article.update.mockResolvedValue({
+        ...mockArticle,
+        assigneeId: 'user-2',
+        assignee: { id: 'user-2', name: 'Reporter Two', email: 'r2@example.com' },
+      });
+
+      const result = await service.assign('article-1', 'user-2', 'Please cover the press conference', 'editor-1');
+      expect(result.assigneeId).toBe('user-2');
+      expect(prisma.article.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ assigneeId: 'user-2', assignmentNote: 'Please cover the press conference' }) }),
+      );
+      expect(auditLog.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'ASSIGNED' }));
+    });
+
+    it('logs REASSIGNED (not ASSIGNED) when the article already had a different assignee', async () => {
+      prisma.article.findUnique.mockResolvedValue({ ...mockArticle, assigneeId: 'user-3' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-2', status: 'ACTIVE' });
+      prisma.article.update.mockResolvedValue({ ...mockArticle, assigneeId: 'user-2' });
+
+      await service.assign('article-1', 'user-2', undefined, 'editor-1');
+      expect(auditLog.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'REASSIGNED' }));
+    });
+
+    it('clears the assignment when assigneeId is null and logs UNASSIGNED', async () => {
+      prisma.article.findUnique.mockResolvedValue({ ...mockArticle, assigneeId: 'user-2' });
+      prisma.article.update.mockResolvedValue({ ...mockArticle, assigneeId: null, assignedAt: null, assignmentNote: null });
+
+      const result = await service.assign('article-1', null, undefined, 'editor-1');
+      expect(result.assigneeId).toBeNull();
+      expect(prisma.article.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ assigneeId: null, assignedAt: null, assignmentNote: null }) }),
+      );
+      expect(auditLog.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'UNASSIGNED' }));
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects assigning to a user that does not exist', async () => {
+      prisma.article.findUnique.mockResolvedValue(mockArticle);
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.assign('article-1', 'ghost-user', undefined, 'editor-1')).rejects.toThrow(BadRequestException);
+      expect(prisma.article.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects assigning to a suspended/inactive user', async () => {
+      prisma.article.findUnique.mockResolvedValue(mockArticle);
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-2', status: 'SUSPENDED' });
+
+      await expect(service.assign('article-1', 'user-2', undefined, 'editor-1')).rejects.toThrow(BadRequestException);
+      expect(prisma.article.update).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for a missing article', async () => {
+      prisma.article.findUnique.mockResolvedValue(null);
+      await expect(service.assign('article-1', 'user-2', undefined, 'editor-1')).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -90,7 +90,10 @@ function renderNode(node: TiptapNode, index: number): React.ReactNode {
       );
 
     case 'heading': {
-      const level = (node.attrs?.level as number) || 1;
+      // The article's own title is this page's only <h1>. Clamp body headings to h2+ so a level-1
+      // node — from older content, a pasted Word/HTML H1, or the "# " Markdown shortcut — can never
+      // render a second <h1>, regardless of what the editor happened to save.
+      const level = Math.min(Math.max((node.attrs?.level as number) || 2, 2), 4);
       const Tag = (`h${level}`) as keyof JSX.IntrinsicElements;
       const sizeClass =
         level === 1

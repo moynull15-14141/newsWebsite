@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { parsePage, parsePositiveInt, DEFAULT_LIMIT, MAX_LIMIT } from '../../common/pagination/parse-pagination';
 
 @Controller('comments')
 export class CommentsController {
@@ -21,8 +22,8 @@ export class CommentsController {
     @Query('search') search?: string,
   ) {
     return this.commentsService.findAll(
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
+      parsePage(page),
+      parsePositiveInt(limit, DEFAULT_LIMIT, MAX_LIMIT),
       status as any,
       articleId,
       search,
@@ -38,8 +39,8 @@ export class CommentsController {
     @Query('status') status?: string,
   ) {
     return this.commentsService.getReports(
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
+      parsePage(page),
+      parsePositiveInt(limit, DEFAULT_LIMIT, MAX_LIMIT),
       status,
     );
   }

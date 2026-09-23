@@ -121,7 +121,10 @@ export default function ReviewQueuePage() {
     if (action === 'edit') {
       navigate(`/articles/${article.id}/edit`);
     } else if (action === 'delete') {
-      if (confirm('Delete this draft permanently?')) deleteMutation.mutate(article.id);
+      const message = article.status === 'ARCHIVED'
+        ? 'Permanently delete this archived article? This also erases its audit history and cannot be undone.'
+        : 'Delete this draft permanently?';
+      if (confirm(message)) deleteMutation.mutate(article.id);
     } else if (action === 'return-to-draft') {
       const reason = window.prompt('Why is this being sent back? The author will see this reason.');
       if (reason === null) return;

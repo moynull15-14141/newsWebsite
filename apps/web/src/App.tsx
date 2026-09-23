@@ -11,9 +11,14 @@ import SearchPage from './pages/SearchPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ReaderLoginPage from './pages/ReaderLoginPage';
 import ReaderRegisterPage from './pages/ReaderRegisterPage';
-import { AccountPage, SavedPage, NotificationsPage, SettingsPage } from './pages/ReaderAccountPages';
+import { AccountPage, SavedPage, NotificationsPage } from './pages/ReaderAccountPages';
 import CollectionPage from './pages/CollectionPage';
 import { LanguageProvider } from './lib/i18n';
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/ReaderPasswordPages';
+import { ReaderProfilePage, ReaderSettingsPage } from './pages/ReaderProfileSettings';
+import JobsListPage from './pages/JobsListPage';
+import JobDetailPage from './pages/JobDetailPage';
+import { SavedJobsPage, JobApplicationsPage } from './pages/ReaderJobsPages';
 
 /**
  * Content routes, shared between the default (bare) language and every prefixed one (`/en`). Keeping
@@ -38,6 +43,8 @@ function contentRoutes() {
     <Route key="district" path="district/:slug" element={<LocationPage />} />,
     <Route key="search" path="search" element={<SearchPage />} />,
     <Route key="collection" path="collection/:slug" element={<CollectionPage />} />,
+    <Route key="jobs" path="jobs" element={<JobsListPage />} />,
+    <Route key="job" path="jobs/:slug" element={<JobDetailPage />} />,
     <Route key="not-found" path="*" element={<NotFoundPage />} />,
   ];
 }
@@ -69,18 +76,28 @@ function App() {
         <Route path="/en/login" element={<ReaderLoginPage />} />
         <Route path="/register" element={<ReaderRegisterPage />} />
         <Route path="/en/register" element={<ReaderRegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/en/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/en/reset-password" element={<ResetPasswordPage />} />
 
         <Route path="/account" element={<MainLayout />}>
           <Route index element={<AccountPage />} />
+          <Route path="profile" element={<ReaderProfilePage />} />
           <Route path="saved" element={<SavedPage />} />
+          <Route path="saved-jobs" element={<SavedJobsPage />} />
+          <Route path="applications" element={<JobApplicationsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<ReaderSettingsPage />} />
         </Route>
         <Route path="/en/account" element={<MainLayout />}>
           <Route index element={<AccountPage />} />
+          <Route path="profile" element={<ReaderProfilePage />} />
           <Route path="saved" element={<SavedPage />} />
+          <Route path="saved-jobs" element={<SavedJobsPage />} />
+          <Route path="applications" element={<JobApplicationsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<ReaderSettingsPage />} />
         </Route>
       </Routes>
     </LanguageProvider>

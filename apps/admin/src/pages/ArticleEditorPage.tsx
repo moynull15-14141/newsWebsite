@@ -4,14 +4,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { isArticleVersionConflict } from '../lib/api-error';
 import { useAuthStore } from '../stores/auth-store';
-import { validateArticleDraft } from '../lib/articles';
+import {
+  validateArticleDraft,
+  buildAutosaveStorageKey, serializeAutosaveDraft, parseAutosaveDraft, shouldOfferDraftRecovery, type AutosaveDraft,
+} from '../lib/articles';
 import RichTextEditor, { type RichTextEditorHandle } from '../components/RichTextEditor';
 import LocationSelector from '../components/LocationSelector';
 import CategorySelector from '../components/CategorySelector';
 import TagSelector from '../components/TagSelector';
 import SeoIntelligencePanel from '../components/SeoIntelligencePanel';
 import type { SeoAnalysis } from '@news-platform/seo';
-import { Save, Send, Check, Globe, ArrowLeft, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus } from 'lucide-react';
+import { Save, Send, Check, Globe, ArrowLeft, ArrowUp, ArrowDown, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus } from 'lucide-react';
 
 interface MediaItem {
   id: string;
@@ -47,6 +50,9 @@ interface ArticleData {
   locationId: string;
   location?: { id: string; parentId: string | null; type: string } | null;
   authorId: string;
+  assigneeId?: string | null;
+  assignee?: { id: string; name: string; email: string } | null;
+  assignmentNote?: string | null;
   featuredImageId: string | null;
   media?: MediaItem | null;
   isBreaking: boolean;
@@ -110,6 +116,9 @@ interface CorrectionEntry {
   correctedBy: { id: string; name: string };
 }
 
+interface RelatedArticleRow { id: string; title: string; slug: string; status: string; publishedAt: string | null; }
+interface RelatedManagement { manual: RelatedArticleRow[]; automatic: RelatedArticleRow[]; }
+
 const auditActionLabels: Record<string, string> = {
   CREATED: 'Created',
   UPDATED: 'Edited',
@@ -122,6 +131,7 @@ const auditActionLabels: Record<string, string> = {
   SCHEDULED: 'Scheduled',
   SCHEDULE_CANCELLED: 'Schedule cancelled',
   CORRECTED: 'Correction posted',
+  RELATED_STORIES_UPDATED: 'Related stories updated',
 };
 
 function slugify(text: string): string {
@@ -188,9 +198,23 @@ export default function ArticleEditorPage() {
   const [versionConflict, setVersionConflict] = useState(false);
   const [newNote, setNewNote] = useState('');
   const [newCorrection, setNewCorrection] = useState('');
+  // Autosave / crash recovery (Phase 2L) — see buildSavePayload/handleSave for the shared save path
+  // this reuses, and lib/articles.ts for why the localStorage draft is only ever offered back when it
+  // still matches the server version it was made on.
+  const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error'>('idle');
+  const [recoverableDraft, setRecoverableDraft] = useState<AutosaveDraft | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Loading an article (or first mounting a new one) populates every field one state-setter at a time —
+  // without this, that initial population would itself look like a dirty edit and fire an autosave.
+  const skipNextAutosaveRef = useRef(true);
   // Before writing a brand-new article, let the reporter check whether the same story already
   // exists in another language — otherwise nothing on this page ever surfaces that (Phase 2H).
   const [coverageSearch, setCoverageSearch] = useState('');
+  // Assignment (Phase 2L) — who is responsible for moving this article forward, independent of the
+  // draft form above: it's its own action against /articles/:id/assign, not part of buildSavePayload.
+  const [assigneeId, setAssigneeIdField] = useState('');
+  const [assignmentNote, setAssignmentNoteField] = useState('');
+  const [relatedSearch, setRelatedSearch] = useState('');
 
   const { data: article, isLoading } = useQuery<ArticleData>({
     queryKey: ['article', id],
@@ -203,6 +227,13 @@ export default function ArticleEditorPage() {
     queryFn: () => apiFetch(`/seo/articles/${id}`),
     enabled: !!id && hasPermission('article.read'),
     staleTime: 30_000,
+  });
+
+  const { data: assignableUsers } = useQuery<{ id: string; name: string; email: string }[]>({
+    queryKey: ['users-authors'],
+    queryFn: () => apiFetch('/users/authors'),
+    enabled: !!id && hasPermission('article.review'),
+    staleTime: 60_000,
   });
 
   useEffect(() => {
@@ -240,8 +271,24 @@ export default function ArticleEditorPage() {
       setBreakingPriority(article.breakingPriority || 1);
       setBreakingEndsAt(article.breakingEndsAt ? article.breakingEndsAt.slice(0, 16) : '');
       setScheduledAt(article.scheduledAt ? article.scheduledAt.slice(0, 16) : '');
+      setAssigneeIdField(article.assigneeId || '');
+      setAssignmentNoteField(article.assignmentNote || '');
+
+      skipNextAutosaveRef.current = true;
+      const draft = parseAutosaveDraft(localStorage.getItem(buildAutosaveStorageKey(id)));
+      setRecoverableDraft(shouldOfferDraftRecovery(draft, article.updatedAt ?? null) ? draft : null);
     }
-  }, [article]);
+  }, [article, id]);
+
+  // A brand-new, never-saved article has no `article` query to trigger the effect above — check once
+  // on mount instead. Any draft found here is safe to offer: there is no server version yet to conflict
+  // with (shouldOfferDraftRecovery's baseUpdatedAt === null case).
+  useEffect(() => {
+    if (id) return;
+    const draft = parseAutosaveDraft(localStorage.getItem(buildAutosaveStorageKey(undefined)));
+    if (shouldOfferDraftRecovery(draft, null)) setRecoverableDraft(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const createMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => apiFetch<{ id: string }>('/articles', { method: 'POST', body: JSON.stringify(data) }),
@@ -351,6 +398,34 @@ export default function ArticleEditorPage() {
       setNewNote('');
     },
   });
+
+  const assignMutation = useMutation({
+    mutationFn: (data: { assigneeId: string | null; note?: string }) => apiFetch(`/articles/${id}/assign`, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['article', id] }),
+  });
+
+  const { data: relatedManagement } = useQuery<RelatedManagement>({
+    queryKey: ['article-related-management', id],
+    queryFn: () => apiFetch(`/articles/${id}/related`),
+    enabled: !!id && hasPermission('article.read'),
+  });
+  const relatedSearchResults = useQuery<{ data: RelatedArticleRow[] }>({
+    queryKey: ['related-article-search', relatedSearch],
+    queryFn: () => apiFetch(`/articles?search=${encodeURIComponent(relatedSearch.trim())}&limit=8`),
+    enabled: !!id && hasPermission('article.review') && relatedSearch.trim().length >= 2,
+  });
+  const relatedMutation = useMutation({
+    mutationFn: (relatedArticleIds: string[]) => apiFetch<RelatedManagement>(`/articles/${id}/related`, {
+      method: 'PATCH', body: JSON.stringify({ relatedArticleIds }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['article-related-management', id] });
+      queryClient.invalidateQueries({ queryKey: ['article-audit-log', id] });
+      setRelatedSearch('');
+    },
+  });
+
+  const setManualRelated = (rows: RelatedArticleRow[]) => relatedMutation.mutate(rows.map((row) => row.id));
 
   const { data: corrections } = useQuery<CorrectionEntry[]>({
     queryKey: ['article-corrections', id],
@@ -468,6 +543,72 @@ export default function ArticleEditorPage() {
     } else {
       await createMutation.mutateAsync(data);
     }
+    localStorage.removeItem(buildAutosaveStorageKey(id));
+  };
+
+  const AUTOSAVE_DEBOUNCE_MS = 4000;
+
+  // Autosave (Phase 2L): reuses the exact same PATCH + expectedUpdatedAt conflict check as the manual
+  // Save button — a stale autosave is rejected by the server exactly like a stale manual save, and
+  // updateMutation's existing onError already flips versionConflict for it, so this needs no separate
+  // conflict-handling path. Only fires for an already-saved article: silently retrying create() on a
+  // timer would produce duplicate article rows instead of updating one, so a brand-new draft is
+  // protected by the localStorage copy alone until its first manual save.
+  const runAutosave = async () => {
+    if (!id || !title.trim() || versionConflict) return;
+    setAutosaveStatus('saving');
+    try {
+      await updateMutation.mutateAsync({ ...buildSavePayload(), expectedUpdatedAt: loadedUpdatedAt || undefined });
+      setAutosaveStatus('saved');
+      localStorage.removeItem(buildAutosaveStorageKey(id));
+    } catch {
+      setAutosaveStatus('error');
+    }
+  };
+
+  useEffect(() => {
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
+    localStorage.setItem(buildAutosaveStorageKey(id), serializeAutosaveDraft(buildSavePayload(), loadedUpdatedAt));
+    setAutosaveStatus('dirty');
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(runAutosave, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+    // Deliberately every field that ends up in buildSavePayload() — anything left out here would edit
+    // silently without ever triggering a save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, slug, excerpt, seoTitle, seoDescription, seoKeywords, canonicalUrl, noIndex, content, categoryId, locationId, JSON.stringify(tagIds), featuredImageId, isBreaking, breakingPriority, breakingEndsAt]);
+
+  const applyRecoveredDraft = () => {
+    if (!recoverableDraft) return;
+    const f = recoverableDraft.fields as Record<string, unknown>;
+    skipNextAutosaveRef.current = true;
+    if (typeof f.title === 'string') setTitle(f.title);
+    if (typeof f.slug === 'string') { setSlug(f.slug); setSlugTouched(true); }
+    if (typeof f.excerpt === 'string') setExcerpt(f.excerpt);
+    if (typeof f.seoTitle === 'string') setSeoTitle(f.seoTitle);
+    if (typeof f.seoDescription === 'string') setSeoDescription(f.seoDescription);
+    if (typeof f.seoKeywords === 'string') setSeoKeywords(f.seoKeywords);
+    if (typeof f.canonicalUrl === 'string') setCanonicalUrl(f.canonicalUrl);
+    if (typeof f.noIndex === 'boolean') setNoIndex(f.noIndex);
+    if (f.content !== undefined) setContent(typeof f.content === 'string' ? f.content : JSON.stringify(f.content));
+    if (typeof f.categoryId === 'string') setCategoryId(f.categoryId);
+    if (typeof f.locationId === 'string') setLocationId(f.locationId);
+    if (Array.isArray(f.tagIds)) setTagIds(f.tagIds.filter((t): t is string => typeof t === 'string'));
+    if (typeof f.featuredImageId === 'string') setFeaturedImageId(f.featuredImageId);
+    if (typeof f.isBreaking === 'boolean') setIsBreaking(f.isBreaking);
+    if (typeof f.breakingPriority === 'number') setBreakingPriority(f.breakingPriority);
+    if (typeof f.breakingEndsAt === 'string') setBreakingEndsAt(f.breakingEndsAt);
+    setRecoverableDraft(null);
+  };
+
+  const discardRecoveredDraft = () => {
+    localStorage.removeItem(buildAutosaveStorageKey(id));
+    setRecoverableDraft(null);
   };
 
   // "Add other language" from the brand-new (never-saved) editor: save this draft first — same
@@ -515,6 +656,14 @@ export default function ArticleEditorPage() {
           <h1 className="text-2xl font-bold text-gray-900">
             {id ? 'Edit Article' : 'New Article'}
           </h1>
+          {id && (
+            <span role="status" aria-live="polite" className="text-xs text-gray-500">
+              {autosaveStatus === 'saving' && 'Saving…'}
+              {autosaveStatus === 'dirty' && 'Unsaved changes'}
+              {autosaveStatus === 'saved' && 'All changes saved'}
+              {autosaveStatus === 'error' && 'Autosave failed — changes kept locally'}
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -632,6 +781,27 @@ export default function ArticleEditorPage() {
                 {returnToDraftMutation.isPending ? 'Sending...' : 'Send back to Draft'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {recoverableDraft && (
+        <div role="alert" className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p className="font-semibold">Unsaved changes were found from a previous session.</p>
+          <p className="mt-1">Restore them, or discard and keep what's currently loaded.</p>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={applyRecoveredDraft}
+              className="inline-flex items-center gap-2 rounded-md border border-blue-400 bg-white px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+            >
+              Restore unsaved changes
+            </button>
+            <button
+              onClick={discardRecoveredDraft}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Discard
+            </button>
           </div>
         </div>
       )}
@@ -869,6 +1039,53 @@ export default function ArticleEditorPage() {
               <TagSelector selectedTagIds={tagIds} onChange={setTagIds} />
             </div>
           </div>
+          {id && hasPermission('article.review') && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <h3 className="text-sm font-medium text-gray-900">Assignment</h3>
+              <p className="mt-1 text-xs text-gray-500">Who is responsible for moving this forward — independent of who wrote it.</p>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label htmlFor="assignee" className="block text-sm font-medium text-gray-700">Assigned to</label>
+                  <select
+                    id="assignee"
+                    value={assigneeId}
+                    onChange={(e) => setAssigneeIdField(e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {assignableUsers?.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
+                  </select>
+                </div>
+                {assigneeId && (
+                  <div>
+                    <label htmlFor="assignment-note" className="block text-sm font-medium text-gray-700">Note (optional)</label>
+                    <textarea
+                      id="assignment-note"
+                      value={assignmentNote}
+                      onChange={(e) => setAssignmentNoteField(e.target.value)}
+                      rows={2}
+                      maxLength={1000}
+                      placeholder="e.g. Please cover the press conference at 4pm"
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+                {article?.assignee && (
+                  <p className="text-xs text-gray-500">Currently assigned to <span className="font-medium text-gray-700">{article.assignee.name}</span>.</p>
+                )}
+                <button
+                  onClick={() => assignMutation.mutate({ assigneeId: assigneeId || null, note: assignmentNote || undefined })}
+                  disabled={assignMutation.isPending || (assigneeId || '') === (article?.assigneeId || '')}
+                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {assignMutation.isPending ? 'Saving…' : assigneeId ? 'Assign' : 'Clear assignment'}
+                </button>
+                {assignMutation.isError && (
+                  <p role="alert" className="text-sm text-red-700">{getApiErrorMessage(assignMutation.error, 'Could not update assignment.')}</p>
+                )}
+              </div>
+            </div>
+          )}
           <div className="rounded-lg border border-gray-200 bg-white p-4">
             <h3 className="text-sm font-medium text-gray-900">Featured Image</h3>
             <div className="mt-4">
@@ -1140,6 +1357,46 @@ export default function ArticleEditorPage() {
                 >
                   Post
                 </button>
+              </div>
+            </div>
+          )}
+
+          {id && hasPermission('article.read') && (
+            <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4">
+              <h3 className="text-sm font-medium text-gray-900">Related Stories</h3>
+              <p className="mt-1 text-xs text-gray-500">Manual selections appear first; eligible automatic suggestions fill the remaining public slots.</p>
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Manual order</p>
+                {relatedManagement?.manual.length ? relatedManagement.manual.map((row, index) => (
+                  <div key={row.id} className="flex min-w-0 items-center gap-2 rounded border border-gray-200 p-2 text-sm">
+                    <span className="w-5 shrink-0 text-gray-400">{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate" title={row.title}>{row.title}</span>
+                    {hasPermission('article.review') && <>
+                      <button type="button" aria-label={`Move up ${row.title}`} disabled={index === 0 || relatedMutation.isPending} onClick={() => { const next = [...relatedManagement.manual]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; setManualRelated(next); }} className="shrink-0 rounded p-1 hover:bg-gray-100 disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+                      <button type="button" aria-label={`Move down ${row.title}`} disabled={index === relatedManagement.manual.length - 1 || relatedMutation.isPending} onClick={() => { const next = [...relatedManagement.manual]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; setManualRelated(next); }} className="shrink-0 rounded p-1 hover:bg-gray-100 disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+                      <button type="button" aria-label={`Remove ${row.title}`} disabled={relatedMutation.isPending} onClick={() => setManualRelated(relatedManagement.manual.filter((item) => item.id !== row.id))} className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"><X className="h-3.5 w-3.5" /></button>
+                    </>}
+                  </div>
+                )) : <p className="text-xs text-gray-400">No manual stories selected.</p>}
+              </div>
+              {hasPermission('article.review') && (
+                <div className="mt-3">
+                  <input value={relatedSearch} onChange={(e) => setRelatedSearch(e.target.value)} placeholder="Search an article to add" className="block w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-sm" />
+                  {relatedSearch.trim().length >= 2 && <div className="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200">
+                    {relatedSearchResults.data?.data.filter((row) => row.id !== id && !relatedManagement?.manual.some((item) => item.id === row.id)).map((row) => (
+                      <button key={row.id} type="button" onClick={() => setManualRelated([...(relatedManagement?.manual ?? []), row])} className="flex w-full min-w-0 items-center justify-between gap-2 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-gray-50">
+                        <span className="truncate">{row.title}</span><span className="shrink-0 text-xs text-gray-400">{row.status}</span>
+                      </button>
+                    ))}
+                  </div>}
+                  {relatedMutation.error && <p role="alert" className="mt-2 text-xs text-red-700">{getApiErrorMessage(relatedMutation.error, 'Could not update related stories.')}</p>}
+                </div>
+              )}
+              <div className="mt-4 border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Automatic suggestions</p>
+                <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                  {relatedManagement?.automatic.length ? relatedManagement.automatic.map((row) => <li key={row.id} className="truncate" title={row.title}>{row.title}</li>) : <li className="text-xs text-gray-400">No eligible suggestions.</li>}
+                </ul>
               </div>
             </div>
           )}

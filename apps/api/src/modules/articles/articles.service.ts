@@ -127,7 +127,7 @@ export class ArticlesService {
   }
 
   async findAll(query: QueryArticlesDto, userId?: string, userPermissions?: string[]) {
-    const { page = 1, limit = 20, search, status, categoryId, locationId, authorId, tagId, languageId, sort = 'createdAt', order = 'desc' } = query;
+    const { page = 1, limit = 20, search, status, categoryId, locationId, authorId, assigneeId, tagId, languageId, sort = 'createdAt', order = 'desc' } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -149,6 +149,10 @@ export class ArticlesService {
 
     if (authorId) {
       where.authorId = authorId;
+    }
+
+    if (assigneeId) {
+      where.assigneeId = assigneeId;
     }
 
     if (tagId) {
@@ -176,6 +180,7 @@ export class ArticlesService {
         orderBy,
         include: {
           author: { select: { id: true, name: true, email: true } },
+          assignee: { select: { id: true, name: true, email: true } },
           category: { select: { id: true, name: true, slug: true } },
           location: { select: { id: true, name: true, slug: true, type: true } },
           language: LANGUAGE_SELECT,
@@ -203,6 +208,7 @@ export class ArticlesService {
       where: { id },
       include: {
         author: { select: { id: true, name: true, email: true } },
+        assignee: { select: { id: true, name: true, email: true } },
         category: true,
         location: true,
         media: { select: { id: true, publicUrl: true, originalFilename: true, altText: true } },
@@ -217,6 +223,108 @@ export class ArticlesService {
     }
 
     return article;
+  }
+
+  async getRelatedManagement(id: string) {
+    const article = await this.prisma.article.findUnique({
+      where: { id },
+      select: { id: true, categoryId: true, locationId: true, languageId: true, articleTags: { select: { tagId: true } } },
+    });
+    if (!article) throw new NotFoundException('Article not found');
+
+    const manual = await this.prisma.articleRelated.findMany({
+      where: { articleId: id },
+      orderBy: { position: 'asc' },
+      select: { position: true, relatedArticle: { select: { id: true, title: true, slug: true, status: true, publishedAt: true } } },
+    });
+    const manualIds = manual.map((row) => row.relatedArticle.id);
+    const matchers: any[] = [];
+    if (article.categoryId) matchers.push({ categoryId: article.categoryId });
+    if (article.locationId) matchers.push({ locationId: article.locationId });
+    const tagIds = (article.articleTags ?? []).map((row) => row.tagId);
+    if (tagIds.length) matchers.push({ articleTags: { some: { tagId: { in: tagIds } } } });
+    const automatic = await this.prisma.article.findMany({
+      where: {
+        id: { notIn: [id, ...manualIds] },
+        status: 'PUBLISHED',
+        publishedAt: { lte: new Date() },
+        ...(article.languageId !== undefined ? { languageId: article.languageId } : {}),
+        ...(matchers.length ? { OR: matchers } : {}),
+      },
+      orderBy: { publishedAt: 'desc' },
+      take: 5,
+      select: { id: true, title: true, slug: true, status: true, publishedAt: true },
+    });
+    return { manual: manual.map((row) => row.relatedArticle), automatic };
+  }
+
+  async updateManualRelated(id: string, relatedArticleIds: string[], actorId: string) {
+    const source = await this.prisma.article.findUnique({ where: { id }, select: { id: true } });
+    if (!source) throw new NotFoundException('Article not found');
+    if (relatedArticleIds.includes(id)) throw new BadRequestException('An article cannot be related to itself.');
+    if (new Set(relatedArticleIds).size !== relatedArticleIds.length) throw new BadRequestException('Duplicate related articles are not allowed.');
+
+    const targets = await this.prisma.article.findMany({ where: { id: { in: relatedArticleIds } }, select: { id: true } });
+    if (targets.length !== relatedArticleIds.length) throw new BadRequestException('One or more related articles do not exist.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.articleRelated.deleteMany({ where: { articleId: id } });
+      if (relatedArticleIds.length) {
+        await tx.articleRelated.createMany({
+          data: relatedArticleIds.map((relatedArticleId, position) => ({ articleId: id, relatedArticleId, position: position + 1 })),
+        });
+      }
+    });
+    await this.auditLog.record({
+      articleId: id,
+      actorId,
+      action: 'RELATED_STORIES_UPDATED',
+      note: relatedArticleIds.length ? `Manual related order: ${relatedArticleIds.join(', ')}` : 'Manual related stories cleared',
+    });
+    return this.getRelatedManagement(id);
+  }
+
+  /** Who is currently responsible for moving this article forward — independent of who wrote it
+   * (Phase 2L). Gated behind article.review, the same tier as Approve/Request Changes: assigning work
+   * to someone else is an editorial-management action, not a plain edit right every author has.
+   * Calling this again reassigns; passing assigneeId: null clears the assignment. */
+  async assign(id: string, assigneeId: string | null, note: string | undefined, actorId: string) {
+    const existing = await this.prisma.article.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Article not found');
+    }
+
+    if (assigneeId) {
+      const assignee = await this.prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, status: true } });
+      if (!assignee) {
+        throw new BadRequestException('Assignee not found');
+      }
+      if (assignee.status !== 'ACTIVE') {
+        throw new BadRequestException('Cannot assign to an inactive user');
+      }
+    }
+
+    const updated = await this.prisma.article.update({
+      where: { id },
+      data: {
+        assigneeId,
+        assignedAt: assigneeId ? new Date() : null,
+        assignmentNote: assigneeId ? (note?.trim() || null) : null,
+      },
+      include: {
+        author: { select: { id: true, name: true, email: true } },
+        assignee: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    await this.auditLog.record({
+      articleId: id,
+      actorId,
+      action: assigneeId ? (existing.assigneeId ? 'REASSIGNED' : 'ASSIGNED') : 'UNASSIGNED',
+      note: assigneeId ? `Assigned to ${updated.assignee?.name ?? assigneeId}` : 'Assignment cleared',
+    });
+
+    return updated;
   }
 
   async findBySlug(slug: string) {
@@ -338,15 +446,26 @@ export class ArticlesService {
       throw new NotFoundException('Article not found');
     }
 
-    if (existing.authorId !== userId && !userPermissions.includes('article.delete')) {
-      throw new ForbiddenException('You can only delete your own articles');
-    }
+    const isPrivileged = userPermissions.includes('article.delete');
 
-    // Anything that has entered review/approval/publication has real editorial history — permanently
-    // erasing the row would erase that history too. Only untouched drafts can be hard-deleted; a
-    // published or previously-reviewed article must be archived instead (Phase 2H).
-    if (existing.status !== 'DRAFT') {
-      throw new BadRequestException('Only draft articles can be permanently deleted. Archive it instead.');
+    if (existing.status === 'ARCHIVED') {
+      // Archiving is already the deliberate end-of-life step; permanently erasing it from there is a
+      // second, more consequential action, so being the original author is not enough on its own here
+      // the way it is for a still-untouched draft — only article.delete holders (Super Admin/Admin in
+      // the seeded roles) may do this. Note this cascades away the article's audit log and revisions
+      // too (ArticleAuditLog.article has onDelete: Cascade) — that's the actual meaning of "permanently
+      // delete" for a retired article, not an oversight.
+      if (!isPrivileged) {
+        throw new ForbiddenException('Only Super Admin or Admin can permanently delete an archived article.');
+      }
+    } else if (existing.status === 'DRAFT') {
+      if (existing.authorId !== userId && !isPrivileged) {
+        throw new ForbiddenException('You can only delete your own articles');
+      }
+    } else {
+      // Anything else (IN_REVIEW/APPROVED/PUBLISHED) has active editorial history — permanently
+      // erasing the row here would erase that history too. It must be archived first (Phase 2H/2I).
+      throw new BadRequestException('Only draft or archived articles can be permanently deleted. Archive it first.');
     }
 
     await this.prisma.articleTag.deleteMany({ where: { articleId: id } });
@@ -355,13 +474,19 @@ export class ArticlesService {
     return { message: 'Article deleted successfully' };
   }
 
-  async submitReview(id: string, userId: string) {
+  // `article.publish` (not `article.edit`/`article.review`) deliberately: it's the same permission
+  // that gates archive/unpublish/restore, so whoever is trusted to pull an article from the public
+  // site and bring it back is also trusted to re-enter it into review — otherwise a restored article
+  // authored by someone else (gone, reassigned, or simply not the one who noticed it needed fixing)
+  // has no one who can move it forward, since only the original author could submit-review before
+  // this (Phase 2I — "restore leaves the article stuck in DRAFT with no path back to PUBLISHED").
+  async submitReview(id: string, userId: string, userPermissions: string[] = []) {
     const existing = await this.prisma.article.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Article not found');
     }
 
-    if (existing.authorId !== userId) {
+    if (existing.authorId !== userId && !userPermissions.includes('article.publish')) {
       throw new ForbiddenException('Only the author can submit for review');
     }
 
@@ -520,9 +645,13 @@ export class ArticlesService {
       throw new BadRequestException('Only archived articles can be restored');
     }
 
+    // publishedAt is cleared for the same reason unpublish() clears it: both land in DRAFT, and a
+    // DRAFT carrying a stale publish timestamp from its previous life is a real state inconsistency,
+    // not just a display quirk — publish() will overwrite it correctly either way, but nothing else
+    // that reads publishedAt should have to know "this DRAFT was published once, a while ago."
     const { count } = await this.prisma.article.updateMany({
       where: { id, status: 'ARCHIVED' },
-      data: { status: 'DRAFT', archivedAt: null },
+      data: { status: 'DRAFT', archivedAt: null, publishedAt: null },
     });
     if (count === 0) {
       throw new ConflictException({ message: 'This article is no longer archived — someone else already acted on it.', code: 'ARTICLE_STATUS_CONFLICT' });
@@ -712,13 +841,14 @@ export class ArticlesService {
     return updated;
   }
 
-  async getStats() {
+  async getStats(userId: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const [publishedToday, drafts, inReview, scheduled, breaking, viewsToday, mostRead] = await Promise.all([
+    const [publishedToday, drafts, inReview, approved, archived, scheduled, breaking, viewsToday, mostRead,
+      myDrafts, myAssigned, recentlyUpdated, recentlyPublished, scheduledPublishing, breakingActivity] = await Promise.all([
       this.prisma.article.count({
         where: {
           status: 'PUBLISHED',
@@ -727,6 +857,8 @@ export class ArticlesService {
       }),
       this.prisma.article.count({ where: { status: 'DRAFT' } }),
       this.prisma.article.count({ where: { status: 'IN_REVIEW' } }),
+      this.prisma.article.count({ where: { status: 'APPROVED' } }),
+      this.prisma.article.count({ where: { status: 'ARCHIVED' } }),
       this.prisma.article.count({ where: { scheduledAt: { not: null }, status: { not: 'PUBLISHED' } } }),
       this.prisma.article.count({ where: { isBreaking: true, status: 'PUBLISHED' } }),
       this.prisma.articleView.count({
@@ -744,16 +876,30 @@ export class ArticlesService {
           publishedAt: true,
         },
       }),
+      this.prisma.article.findMany({ where: { authorId: userId, status: 'DRAFT' }, orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, title: true, status: true, updatedAt: true } }),
+      this.prisma.article.findMany({ where: { assigneeId: userId, status: { not: 'ARCHIVED' } }, orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, title: true, status: true, updatedAt: true } }),
+      this.prisma.article.findMany({ orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, title: true, status: true, updatedAt: true } }),
+      this.prisma.article.findMany({ where: { status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, take: 5, select: { id: true, title: true, status: true, publishedAt: true } }),
+      this.prisma.article.findMany({ where: { scheduledAt: { not: null }, status: { not: 'PUBLISHED' } }, orderBy: { scheduledAt: 'asc' }, take: 5, select: { id: true, title: true, status: true, scheduledAt: true } }),
+      this.prisma.breakingNews.findMany({ where: { archivedAt: null }, orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, headline: true, isActive: true, startAt: true, endAt: true, updatedAt: true } }),
     ]);
 
     return {
       publishedToday,
       drafts,
       inReview,
+      approved,
+      archived,
       scheduled,
       breaking,
       viewsToday,
       mostRead,
+      myDrafts,
+      myAssigned,
+      recentlyUpdated,
+      recentlyPublished,
+      scheduledPublishing,
+      breakingActivity,
     };
   }
 

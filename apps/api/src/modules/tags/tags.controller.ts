@@ -16,6 +16,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { parsePage, parsePositiveInt, DEFAULT_LIMIT, MAX_LIMIT } from '../../common/pagination/parse-pagination';
 
 @Controller('tags')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,8 +32,8 @@ export class TagsController {
     @Query('all') all?: string,
   ) {
     return this.tagsService.findAll({
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: page ? parsePage(page) : undefined,
+      limit: limit ? parsePositiveInt(limit, DEFAULT_LIMIT, MAX_LIMIT) : undefined,
       search,
       all: all === 'true',
     });

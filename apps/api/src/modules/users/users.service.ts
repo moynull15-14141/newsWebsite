@@ -154,6 +154,9 @@ export class UsersService {
     return user;
   }
 
+  // Unguarded by permission (any authenticated staff member can pick an author/assignee) and returns
+  // every active user's name/email — acceptable for a bounded newsroom headcount, but still worth a
+  // hard ceiling so it can never become an unbounded query if the user table ever grows large.
   async findAuthors() {
     return this.prisma.user.findMany({
       where: { status: 'ACTIVE' },
@@ -163,6 +166,7 @@ export class UsersService {
         email: true,
       },
       orderBy: { name: 'asc' },
+      take: 500,
     });
   }
 

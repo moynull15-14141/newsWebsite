@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { parsePage, parsePositiveInt, DEFAULT_LIMIT, MAX_LIMIT } from '../../common/pagination/parse-pagination';
 
 @Controller('ads')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -27,8 +28,8 @@ export class AdsController {
     @Query('slot') slot?: string,
   ) {
     return this.adsService.findAll(
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
+      parsePage(page),
+      parsePositiveInt(limit, DEFAULT_LIMIT, MAX_LIMIT),
       status as any,
       slot,
     );

@@ -19,6 +19,7 @@ enum NotificationType {
   NEW_ARTICLE
   RECOMMENDATION
   SYSTEM
+  JOB_ALERT
 }
 
 enum SubscriberStatus {
@@ -163,6 +164,63 @@ enum ArticleStatus {
   ARCHIVED
 }
 
+/// Job posting workflow (Phase 2O) — mirrors ArticleStatus's DRAFT→IN_REVIEW→APPROVED→PUBLISHED→
+/// ARCHIVED shape with two job-specific additions: SCHEDULED (a job approved for a future publishAt,
+/// same idea as Article's own scheduling) and EXPIRED (deadline passed while still PUBLISHED — a
+/// distinct state from ARCHIVED, which is an admin's deliberate takedown).
+enum JobStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  EXPIRED
+  ARCHIVED
+}
+
+enum JobCategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EmployerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+  TEMPORARY
+  FREELANCE
+}
+
+enum WorkplaceType {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+/// How a candidate actually applies. INTERNAL means the application form lives on this platform and
+/// produces a JobApplication row; EXTERNAL_URL/EMAIL mean the "Apply Now" action sends the candidate
+/// off-platform (an employer's own site, or a plain mailto:) and no JobApplication row is created.
+enum ApplicationMethod {
+  INTERNAL
+  EXTERNAL_URL
+  EMAIL
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  REJECTED
+  ACCEPTED
+  WITHDRAWN
+}
+
 // ==================== MODELS ====================
 
 model User {
@@ -177,6 +235,10 @@ model User {
   userRoles               UserRoleAssignment[]
   authoredArticles        Article[]                  @relation("ArticleAuthor")
   reviewedArticles        Article[]                  @relation("ArticleReviewer")
+  assignedArticles        Article[]                  @relation("ArticleAssignee")
+  createdBreakingNews     BreakingNews[]              @relation("BreakingNewsCreatedBy")
+  updatedBreakingNews     BreakingNews[]              @relation("BreakingNewsUpdatedBy")
+  breakingNewsAuditLogs   BreakingNewsAuditLog[]
   sessions                Session[]
   uploadedMedia           Media[]
   revisedArticles         ArticleRevision[]
@@ -197,6 +259,16 @@ model User {
   preferenceLocations     ReaderPreferenceLocation[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
+
+  // Jobs platform (Phase 2O)
+  createdJobs        Job[]             @relation("JobCreatedBy")
+  updatedJobs        Job[]             @relation("JobUpdatedBy")
+  jobAuditLogEntries JobAuditLog[]
+  savedJobs          SavedJob[]
+  resumes            Resume[]
+  jobApplications    JobApplication[]
+  reviewedApplications JobApplication[] @relation("ApplicationReviewer")
+  createdEmployers   Employer[]
 
   @@map("users")
 }
@@ -288,6 +360,8 @@ model Location {
   readerPreferences ReaderPreferenceLocation[]
   homepageSections  HomepageSection[]
   translations      LocationTranslation[]
+  jobs              Job[]
+  employers         Employer[]
 
   @@unique([type, parentId, slug])
   @@index([slug])
@@ -416,12 +490,19 @@ model Article {
   breakingPriority   Int?          @map("breaking_priority")
   // Scheduling fields
   scheduledAt        DateTime?     @map("scheduled_at")
+  // Assignment fields (Phase 2L) — who is currently responsible for moving this article forward,
+  // separate from authorship: an editor can assign a story to a reporter/writer without changing who
+  // wrote it, and reassignment is just calling assign() again (no history kept beyond the audit log).
+  assigneeId         String?       @map("assignee_id")
+  assignedAt         DateTime?     @map("assigned_at")
+  assignmentNote     String?       @map("assignment_note")
   // View tracking
   viewCount          Int           @default(0) @map("view_count")
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   author             User                     @relation("ArticleAuthor", fields: [authorId], references: [id])
+  assignee           User?                    @relation("ArticleAssignee", fields: [assigneeId], references: [id])
   category           Category?                @relation(fields: [categoryId], references: [id])
   location           Location?                @relation(fields: [locationId], references: [id])
   media              Media?                   @relation("ArticleFeaturedImage", fields: [featuredImageId], references: [id])
@@ -439,6 +520,9 @@ model Article {
   auditLogs          ArticleAuditLog[]
   notifications      Notification[]
   homepagePlacements HomepagePlacement[]
+  breakingNewsItems  BreakingNews[]
+  manualRelated      ArticleRelated[] @relation("RelatedSource")
+  manuallyRelatedTo  ArticleRelated[] @relation("RelatedTarget")
 
   @@unique([translationGroupId, languageId])
   @@index([slug])
@@ -452,11 +536,29 @@ model Article {
   @@index([isBreaking])
   @@index([breakingPriority])
   @@index([scheduledAt])
+  @@index([assigneeId])
   @@index([status, publishedAt])
   @@index([status, isBreaking])
   @@index([languageId])
   @@index([translationGroupId])
   @@map("articles")
+}
+
+/// Editor-curated related stories. Automatic recommendations remain computed at read time and fill
+/// any remaining slots after these ordered rows.
+model ArticleRelated {
+  articleId        String   @map("article_id")
+  relatedArticleId String   @map("related_article_id")
+  position         Int
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  article        Article @relation("RelatedSource", fields: [articleId], references: [id], onDelete: Cascade)
+  relatedArticle Article @relation("RelatedTarget", fields: [relatedArticleId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, relatedArticleId])
+  @@unique([articleId, position])
+  @@index([relatedArticleId])
+  @@map("article_related")
 }
 
 model ArticleView {
@@ -535,6 +637,8 @@ model Media {
   featuredArticles Article[]             @relation("ArticleFeaturedImage")
   ads              Ad[]
   collectionCovers EditorialCollection[]
+  readerAvatars    ReaderProfile[]       @relation("ReaderAvatar")
+  employerLogos    Employer[]            @relation("EmployerLogo")
 }
 
 model ReaderProfile {
@@ -543,10 +647,18 @@ model ReaderProfile {
   displayName       String
   preferredLanguage String   @default("en") @map("preferred_language")
   avatarMediaId     String?  @map("avatar_media_id")
+  phone             String?
+  bio               String?
+  location          String?
+  theme             String   @default("SYSTEM")
+  profilePublic     Boolean  @default(false) @map("profile_public")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar Media? @relation("ReaderAvatar", fields: [avatarMediaId], references: [id], onDelete: SetNull)
+
+  @@index([avatarMediaId])
 
   @@map("reader_profiles")
 }
@@ -598,6 +710,8 @@ model NotificationPreference {
   breakingNews Boolean  @default(true) @map("breaking_news")
   categoryNews Boolean  @default(true) @map("category_news")
   locationNews Boolean  @default(true) @map("location_news")
+  jobAlerts    Boolean  @default(false) @map("job_alerts")
+  accountSecurity Boolean @default(true) @map("account_security")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -811,6 +925,74 @@ model ArticleAuditLog {
   @@map("article_audit_logs")
 }
 
+/// Admin-controlled live breaking-news ticker (Phase 2L) — deliberately separate from Article's own
+/// isBreaking/breakingPriority/breakingEndsAt flags (Phase 2H), which mark an article itself as
+/// breaking for homepage/hero placement. This model is the ticker bar's own content: a headline with
+/// full appearance control, optionally but not necessarily linked to an article, so the newsroom can
+/// run a breaking item (e.g. a live/developing story with no article yet) without being forced to
+/// create one. Article's own breaking flags are untouched by this feature.
+model BreakingNews {
+  id        String  @id @default(uuid())
+  headline  String
+  articleId String? @map("article_id")
+
+  isActive Boolean @default(false) @map("is_active")
+  /// Ascending sort order for the public ticker — 1 is shown first.
+  priority Int     @default(0)
+  startAt  DateTime? @map("start_at")
+  endAt    DateTime? @map("end_at")
+
+  /// 'SOLID' | 'GRADIENT'
+  backgroundMode    String  @default("SOLID") @map("background_mode")
+  backgroundColor   String  @default("#D32F2F") @map("background_color")
+  gradientStart     String? @map("gradient_start")
+  gradientEnd       String? @map("gradient_end")
+  /// 'LEFT_RIGHT' | 'RIGHT_LEFT' | 'TOP_BOTTOM' | 'BOTTOM_TOP' | 'DIAGONAL'
+  gradientDirection String? @map("gradient_direction")
+  textColor             String @default("#FFFFFF") @map("text_color")
+  badgeBackgroundColor  String @default("#FFFFFF") @map("badge_background_color")
+  badgeTextColor        String @default("#D32F2F") @map("badge_text_color")
+  /// Full ticker-cycle duration in milliseconds — admin-tunable animation speed.
+  animationSpeedMs Int @default(18000) @map("animation_speed_ms")
+
+  createdById String? @map("created_by_id")
+  updatedById String? @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  archivedAt  DateTime? @map("archived_at")
+
+  // SetNull, not Cascade: if the linked article is ever hard-deleted, the ticker item survives as a
+  // plain (now unlinked) headline rather than disappearing or leaving a dangling reference.
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  createdBy User?    @relation("BreakingNewsCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?    @relation("BreakingNewsUpdatedBy", fields: [updatedById], references: [id])
+  auditLogs BreakingNewsAuditLog[]
+
+  // Serves the public ticker's own query (active items due to show, in order) and the admin table.
+  @@index([isActive, archivedAt, priority])
+  @@index([startAt, endAt])
+  @@index([articleId])
+  @@map("breaking_news")
+}
+
+/// Same append-only "who did what, when" pattern as ArticleAuditLog, kept as its own table rather than
+/// reusing ArticleAuditLog because that table's articleId column is required — most breaking-news
+/// actions (activate/deactivate/reorder/color changes) aren't about any one article.
+model BreakingNewsAuditLog {
+  id             String   @id @default(uuid())
+  breakingNewsId String   @map("breaking_news_id")
+  actorId        String?  @map("actor_id")
+  action         String
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  breakingNews BreakingNews @relation(fields: [breakingNewsId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id])
+
+  @@index([breakingNewsId, createdAt])
+  @@map("breaking_news_audit_logs")
+}
+
 model PlatformSetting {
   key         String   @id
   value       Json
@@ -987,4 +1169,211 @@ model AnalyticsEvent {
   @@index([adId])
   @@index([eventType, createdAt])
   @@map("analytics_events")
+}
+
+// ==================== JOBS PLATFORM (Phase 2O) ====================
+
+/// Job taxonomy, kept as its own small model rather than reusing the news `Category` tree: job
+/// categories (Government, Bank, IT & Software, ...) are a fundamentally different, flatter list than
+/// news sections, and keeping them separate means neither taxonomy's admin UI/queries have to filter
+/// the other out.
+model JobCategory {
+  id          String            @id @default(uuid())
+  name        String
+  slug        String            @unique
+  description String?
+  status      JobCategoryStatus @default(ACTIVE)
+  sortOrder   Int               @default(0) @map("sort_order")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  jobs Job[]
+
+  @@index([slug])
+  @@index([status])
+  @@map("job_categories")
+}
+
+/// Employer/company foundation for Phase 2O — admin-managed only (no self-service login/dashboard yet;
+/// that is Phase 2P). Deliberately shaped like ReaderProfile (1:1-with-User avatar/logo pattern) so a
+/// real employer login can be layered on in Phase 2P by adding a nullable `userId` here rather than
+/// redesigning the model.
+model Employer {
+  id           String         @id @default(uuid())
+  name         String
+  slug         String         @unique
+  logoMediaId  String?        @map("logo_media_id")
+  website      String?
+  description  String?
+  industry     String?
+  locationId   String?        @map("location_id")
+  contactEmail String?        @map("contact_email")
+  contactPhone String?        @map("contact_phone")
+  status       EmployerStatus @default(ACTIVE)
+  createdById  String?        @map("created_by_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  logo      Media?    @relation("EmployerLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  location  Location? @relation(fields: [locationId], references: [id])
+  createdBy User?     @relation(fields: [createdById], references: [id])
+  jobs      Job[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([logoMediaId])
+  @@map("employers")
+}
+
+/// Mirrors Article's shape closely (Json rich-text fields, the same DRAFT→...→PUBLISHED→ARCHIVED
+/// workflow idea via JobStatus, the same createdBy/updatedBy audit pair) but is intentionally its own
+/// model rather than an Article subtype — a job posting has no author/byline concept and instead has
+/// employer/salary/deadline/application fields Article has no use for.
+model Job {
+  id           String   @id @default(uuid())
+  title        String
+  slug         String   @unique
+  summary      String?
+  description  Json?
+  responsibilities Json?
+  requirements Json?
+  qualifications   Json?
+  experience   String?
+
+  salaryMin        Int?     @map("salary_min")
+  salaryMax        Int?     @map("salary_max")
+  salaryCurrency   String?  @default("BDT") @map("salary_currency")
+  salaryNegotiable Boolean  @default(false) @map("salary_negotiable")
+
+  employmentType EmploymentType @map("employment_type")
+  workplaceType  WorkplaceType @default(ON_SITE) @map("workplace_type")
+  vacancies      Int?          @default(1)
+
+  categoryId String  @map("category_id")
+  employerId String  @map("employer_id")
+  locationId String? @map("location_id")
+
+  applicationMethod       ApplicationMethod @default(INTERNAL) @map("application_method")
+  externalApplyUrl        String?           @map("external_apply_url")
+  applicationEmail        String?           @map("application_email")
+  applicationInstructions String?           @map("application_instructions")
+
+  featured    Boolean   @default(false)
+  status      JobStatus @default(DRAFT)
+  publishedAt DateTime? @map("published_at")
+  scheduledAt DateTime? @map("scheduled_at")
+  deadline    DateTime?
+  viewCount   Int       @default(0) @map("view_count")
+
+  createdById String   @map("created_by_id")
+  updatedById String?  @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category     JobCategory      @relation(fields: [categoryId], references: [id])
+  employer     Employer         @relation(fields: [employerId], references: [id])
+  location     Location?        @relation(fields: [locationId], references: [id])
+  createdBy    User             @relation("JobCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?            @relation("JobUpdatedBy", fields: [updatedById], references: [id])
+  applications JobApplication[]
+  savedBy      SavedJob[]
+  auditLogs    JobAuditLog[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([categoryId])
+  @@index([employerId])
+  @@index([locationId])
+  @@index([status, publishedAt])
+  @@index([featured])
+  @@index([deadline])
+  @@map("jobs")
+}
+
+/// Same append-only audit pattern as ArticleAuditLog (see that model for the full rationale) — one
+/// table, free-text `action`/fromStatus/toStatus rather than a closed enum, so new workflow actions
+/// never require a migration.
+model JobAuditLog {
+  id         String   @id @default(uuid())
+  jobId      String   @map("job_id")
+  actorId    String?  @map("actor_id")
+  action     String
+  fromStatus String?  @map("from_status")
+  toStatus   String?  @map("to_status")
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([jobId, createdAt])
+  @@map("job_audit_logs")
+}
+
+/// Mirrors Bookmark exactly (see that model) — `@@unique([userId, jobId])` is what makes "save" an
+/// idempotent upsert instead of needing an application-level duplicate check.
+model SavedJob {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  jobId     String   @map("job_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId, createdAt])
+  @@index([jobId])
+  @@map("saved_jobs")
+}
+
+/// Deliberately its own small model rather than reusing Media: a resume is applicant-owned, private
+/// (never listed in the admin Media library, never referenced by public pages) and not necessarily an
+/// image, so Media's magic-byte image-signature validation doesn't apply. `isDefault` lets a user keep
+/// several resumes and pick which one a new application uses without deleting the others.
+model Resume {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  fileName   String   @map("file_name")
+  storageKey String   @unique @map("storage_key")
+  publicUrl  String   @map("public_url")
+  mimeType   String   @map("mime_type")
+  size       Int
+  isDefault  Boolean  @default(false) @map("is_default")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications JobApplication[]
+
+  @@index([userId])
+  @@map("resumes")
+}
+
+/// Only ever created for `Job.applicationMethod == INTERNAL` — an EXTERNAL_URL/EMAIL job sends the
+/// candidate off-platform instead and no row is created here (see ApplicationMethod). `notes` is an
+/// admin-only internal field, never serialized to the applicant-facing API.
+model JobApplication {
+  id           String            @id @default(uuid())
+  jobId        String            @map("job_id")
+  applicantId  String            @map("applicant_id")
+  resumeId     String?           @map("resume_id")
+  coverLetter  String?           @map("cover_letter")
+  status       ApplicationStatus @default(SUBMITTED)
+  method       ApplicationMethod @default(INTERNAL)
+  notes        String?
+  reviewedById String?           @map("reviewed_by_id")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  applicant  User     @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  resume     Resume?  @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  reviewedBy User?    @relation("ApplicationReviewer", fields: [reviewedById], references: [id])
+
+  @@unique([jobId, applicantId])
+  @@index([applicantId, createdAt])
+  @@index([jobId, status])
+  @@index([status])
+  @@map("job_applications")
 }

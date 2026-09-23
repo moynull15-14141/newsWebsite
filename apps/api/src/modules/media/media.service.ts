@@ -9,6 +9,24 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const EXTENSIONS_BY_MIME: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+/** The `mimetype` on an uploaded file is whatever Content-Type the client's multipart request claimed
+ * — trivially spoofable (rename a script to photo.jpg, send it as image/jpeg). Checking the file's own
+ * magic bytes is the actual file-type validation Phase 2M asks for, cheap enough not to need a
+ * dependency: these three formats' signatures are a handful of fixed leading bytes each. */
+function hasValidImageSignature(buffer: Buffer | undefined, mimetype: string): boolean {
+  if (!buffer || buffer.length < 12) return false;
+  switch (mimetype) {
+    case 'image/jpeg':
+      return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    case 'image/png':
+      return buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    case 'image/webp':
+      return buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+    default:
+      return false;
+  }
+}
+
 @Injectable()
 export class MediaService {
   constructor(
@@ -27,7 +45,13 @@ export class MediaService {
     if (file.size > MAX_FILE_SIZE) {
       throw new BadRequestException(`File too large. Maximum size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
     }
+    if (!hasValidImageSignature(file.buffer, file.mimetype)) {
+      throw new BadRequestException('File content does not match a supported image format.');
+    }
 
+    // Extension is derived from the validated MIME type, never from the client-supplied filename —
+    // keeps storage keys predictable and immune to path traversal or double-extension tricks
+    // (e.g. "photo.jpg.exe" or "../../etc/passwd.png") regardless of what originalFilename claims.
     const ext = EXTENSIONS_BY_MIME[file.mimetype] || path.extname(file.originalname).toLowerCase();
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8);

@@ -61,6 +61,7 @@ export class AuthService {
         name: user.name,
         email: user.email,
         status: user.status,
+        accountType: user.accountType,
         roles: user.userRoles.map((ur) => ({
           id: ur.role.id,
           name: ur.role.name,

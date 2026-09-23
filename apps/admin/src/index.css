@@ -8,6 +8,35 @@
   }
 }
 
+@layer base {
+  /* Dark-mode remap for the gray scale admin actually uses (checked via `grep -roh` across
+     src/pages, src/components, src/layouts, src/homepage — this app is almost entirely `gray-*`,
+     unlike the reader site's `neutral-*` mix). Plain `color`/`background-color`/`border-color`
+     declarations, not `@apply`: with this many overlapping selector groups, Tailwind's own
+     circular-@apply guard trips on false positives (see apps/web/src/index.css for the same fix
+     and the fuller writeup) — raw `theme()` values produce identical CSS without tripping it.
+     The sidebar keeps its own fixed hex palette (tailwind.config.js `sidebar.*`) in both themes —
+     it's designed to always read as a dark rail, so it's deliberately untouched here. */
+  .dark body { background-color: theme('colors.neutral.950'); color: theme('colors.neutral.100'); }
+  .dark .bg-white { background-color: theme('colors.neutral.900'); }
+  .dark .bg-gray-50, .dark .bg-gray-100 { background-color: theme('colors.neutral.950'); }
+  .dark .bg-gray-200, .dark .bg-gray-300 { background-color: theme('colors.neutral.800'); }
+
+  .dark .text-gray-900, .dark .text-gray-800 { color: theme('colors.neutral.100'); }
+  .dark .text-gray-700 { color: theme('colors.neutral.300'); }
+  .dark .text-gray-600, .dark .text-gray-500 { color: theme('colors.neutral.400'); }
+  .dark .text-gray-400, .dark .text-gray-300 { color: theme('colors.neutral.500'); }
+
+  .dark .border-gray-100, .dark .border-gray-200 { border-color: theme('colors.neutral.700'); }
+  .dark .border-gray-300 { border-color: theme('colors.neutral.600'); }
+  .dark input, .dark textarea, .dark select {
+    border-color: theme('colors.neutral.600');
+    background-color: theme('colors.neutral.900');
+    color: theme('colors.neutral.100');
+  }
+  .dark img { filter: brightness(0.95); }
+}
+
 /* Article content editor (TipTap): the table/task-list/code-block extensions render bare DOM nodes
  * with no styling of their own. These rules are deliberately OUTSIDE any @layer: Tailwind Typography's
  * own `.prose td`/`.prose th` rules land in a later cascade layer than plain `@layer components`, so a

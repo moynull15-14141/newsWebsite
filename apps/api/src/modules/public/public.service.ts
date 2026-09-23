@@ -268,9 +268,27 @@ export class PublicService {
   /** Related stories stay in the same language as the article being read — a reader of the English
    * story should never be offered Bangla-only "related" links they cannot read. */
   async getRelatedArticles(articleId: string, categoryId?: string, tagIds?: string[], locationId?: string, languageId?: string | null) {
+    const now = new Date();
+    const manualRows = await this.prisma.articleRelated.findMany({
+      where: {
+        articleId,
+        relatedArticle: {
+          status: 'PUBLISHED',
+          publishedAt: { lte: now },
+          ...(languageId !== undefined ? { languageId } : {}),
+        },
+      },
+      orderBy: { position: 'asc' },
+      take: 5,
+      select: { relatedArticle: { select: ARTICLE_SELECT } },
+    });
+    const manual = manualRows.map((row) => row.relatedArticle);
+    if (manual.length >= 5) return manual;
+
     const where: any = {
       status: 'PUBLISHED',
-      id: { not: articleId },
+      publishedAt: { lte: now },
+      id: { notIn: [articleId, ...manual.map((article) => article.id)] },
       OR: [],
     };
     if (languageId !== undefined) where.languageId = languageId;
@@ -289,12 +307,13 @@ export class PublicService {
       where.OR.push({ status: 'PUBLISHED' });
     }
 
-    return this.prisma.article.findMany({
+    const automatic = await this.prisma.article.findMany({
       where,
-      take: 5,
+      take: 5 - manual.length,
       orderBy: { publishedAt: 'desc' },
       select: ARTICLE_SELECT,
     });
+    return [...manual, ...automatic];
   }
 
   /**

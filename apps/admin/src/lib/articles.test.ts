@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildArticleListQuery, countQueueWarnings, getArticleActions, validateArticleDraft } from './articles';
+import {
+  buildArticleListQuery, countQueueWarnings, getArticleActions, validateArticleDraft,
+  buildAutosaveStorageKey, serializeAutosaveDraft, parseAutosaveDraft, shouldOfferDraftRecovery,
+} from './articles';
 
 describe('buildArticleListQuery', () => {
   it('sends only page and limit when no filters are set', () => {
@@ -46,13 +49,18 @@ describe('getArticleActions', () => {
 
   it('lets the author submit their own draft for review without any special permission', () => {
     const actions = getArticleActions(draftByMe, allow(), ME);
-    // Draft -> submit-review has no permission gate on the API — only "is this my article?" matters.
+    // Draft -> submit-review is otherwise author-only — "is this my article?" or article.publish.
     expect(actions.map((a) => a.action)).toEqual(['submit-review']);
   });
 
-  it('never offers Submit Review on someone else\'s draft, even with article.edit', () => {
+  it('never offers Submit Review on someone else\'s draft from article.edit alone', () => {
     const actions = getArticleActions(draftBySomeoneElse, allow('article.edit'), ME);
     expect(actions.map((a) => a.action)).not.toContain('submit-review');
+  });
+
+  it('lets an article.publish holder submit someone else\'s draft — otherwise a restored article authored by someone else has no one who can move it forward', () => {
+    const actions = getArticleActions(draftBySomeoneElse, allow('article.publish'), ME);
+    expect(actions.map((a) => a.action)).toContain('submit-review');
   });
 
   it('shows Edit (from article.edit) alongside Submit Review for the author\'s own draft', () => {
@@ -93,7 +101,7 @@ describe('getArticleActions', () => {
     expect(actions.map((a) => a.action)).toEqual(['edit']);
   });
 
-  it('shows Delete only with article.delete on a DRAFT — the API refuses to hard-delete anything else', () => {
+  it('shows Delete only with article.delete on a DRAFT — the API refuses to hard-delete anything still active', () => {
     const withoutDelete = getArticleActions(draftByMe, allow('article.edit'), ME);
     expect(withoutDelete.map((a) => a.action)).not.toContain('delete');
 
@@ -101,11 +109,21 @@ describe('getArticleActions', () => {
     expect(withDelete.map((a) => a.action)).toContain('delete');
   });
 
-  it('never offers Delete once an article has left DRAFT, even with article.delete', () => {
-    for (const status of ['IN_REVIEW', 'APPROVED', 'PUBLISHED', 'ARCHIVED']) {
+  it('never offers Delete on an article still active in the workflow (IN_REVIEW/APPROVED/PUBLISHED), even with article.delete', () => {
+    for (const status of ['IN_REVIEW', 'APPROVED', 'PUBLISHED']) {
       const actions = getArticleActions({ status }, allow('article.delete'), ME);
       expect(actions.map((a) => a.action)).not.toContain('delete');
     }
+  });
+
+  it('offers Delete on an ARCHIVED article only with article.delete — permanently erasing a retired article is Super Admin/Admin only, even for its own author', () => {
+    const archivedByMe = { status: 'ARCHIVED', author: { id: ME } };
+
+    const withoutDelete = getArticleActions(archivedByMe, allow('article.edit', 'article.publish'), ME);
+    expect(withoutDelete.map((a) => a.action)).not.toContain('delete');
+
+    const withDelete = getArticleActions(archivedByMe, allow('article.delete'), ME);
+    expect(withDelete.map((a) => a.action)).toContain('delete');
   });
 
   it('grants every action the viewer is entitled to, without a signed-in user id for submit-review', () => {
@@ -174,5 +192,47 @@ describe('countQueueWarnings', () => {
 
   it('does not flag a future schedule on an approved article', () => {
     expect(countQueueWarnings({ ...complete, status: 'APPROVED', scheduledAt: '2026-03-01T00:00:00Z' }, now)).toBe(0);
+  });
+});
+
+describe('autosave draft helpers', () => {
+  it('keys a saved article by id and a new article by a fixed slot', () => {
+    expect(buildAutosaveStorageKey('article-1')).toBe('bd-news-autosave-article-1');
+    expect(buildAutosaveStorageKey(undefined)).toBe('bd-news-autosave-new');
+  });
+
+  it('round-trips fields and the base server version through serialize/parse', () => {
+    const raw = serializeAutosaveDraft({ title: 'Draft title' }, '2026-01-01T00:00:00Z');
+    const parsed = parseAutosaveDraft(raw);
+    expect(parsed?.fields).toEqual({ title: 'Draft title' });
+    expect(parsed?.baseUpdatedAt).toBe('2026-01-01T00:00:00Z');
+    expect(typeof parsed?.savedAt).toBe('number');
+  });
+
+  it('never lets missing, corrupt or foreign localStorage values through as draft data', () => {
+    expect(parseAutosaveDraft(null)).toBeNull();
+    expect(parseAutosaveDraft(undefined)).toBeNull();
+    expect(parseAutosaveDraft('not valid json {{{')).toBeNull();
+    expect(parseAutosaveDraft('"just a string"')).toBeNull();
+    expect(parseAutosaveDraft(JSON.stringify({ somethingElse: true }))).toBeNull();
+  });
+
+  it('offers recovery only when the draft was based on the version currently on the server', () => {
+    const draft = { baseUpdatedAt: '2026-01-01T00:00:00Z', savedAt: Date.now(), fields: {} };
+    expect(shouldOfferDraftRecovery(draft, '2026-01-01T00:00:00Z')).toBe(true);
+  });
+
+  it('discards a draft that is stale against a newer server save instead of offering to overwrite it', () => {
+    const draft = { baseUpdatedAt: '2026-01-01T00:00:00Z', savedAt: Date.now(), fields: {} };
+    expect(shouldOfferDraftRecovery(draft, '2026-02-01T00:00:00Z')).toBe(false);
+  });
+
+  it('offers a new-article draft that has no server version to compare against', () => {
+    const draft = { baseUpdatedAt: null, savedAt: Date.now(), fields: {} };
+    expect(shouldOfferDraftRecovery(draft, null)).toBe(true);
+  });
+
+  it('never offers recovery when there is no draft at all', () => {
+    expect(shouldOfferDraftRecovery(null, '2026-01-01T00:00:00Z')).toBe(false);
   });
 });

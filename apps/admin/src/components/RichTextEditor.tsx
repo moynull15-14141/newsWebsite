@@ -78,7 +78,10 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false } }),
+      // heading levels capped to 2–4: the article's own title is the page's only H1 (toolbar already
+      // only offers H2–H4), and without this the Markdown "# " input rule or a pasted Word/HTML H1
+      // would still slip a level-1 heading into the body, producing a second <h1> on the public page.
+      StarterKit.configure({ link: { openOnClick: false }, heading: { levels: [2, 3, 4] } }),
       ImageWithLayout,
       Placeholder.configure({ placeholder: placeholder || 'Start writing...' }),
       TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'] }),

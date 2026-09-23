@@ -58,7 +58,10 @@ export function getArticleActions(
     actions.push({ label: 'Edit', action: 'edit' });
   }
 
-  if (article.status === 'DRAFT' && !!currentUserId && article.author?.id === currentUserId) {
+  // Mirrors the API: the author can always submit their own draft, and article.publish holders (the
+  // same permission that gates archive/unpublish/restore) can also submit it — otherwise a restored
+  // article authored by someone else would have no one left who could move it forward.
+  if (article.status === 'DRAFT' && ((!!currentUserId && article.author?.id === currentUserId) || hasPermission('article.publish'))) {
     actions.push({ label: 'Submit Review', action: 'submit-review' });
   }
   if (['IN_REVIEW', 'APPROVED'].includes(article.status) && hasPermission('article.review')) {
@@ -77,9 +80,12 @@ export function getArticleActions(
   if (article.status === 'ARCHIVED' && hasPermission('article.publish')) {
     actions.push({ label: 'Restore', action: 'restore' });
   }
-  // Hard-delete is only safe for untouched drafts — anything reviewed/published has real editorial
-  // history the API now refuses to erase (Phase 2H), so don't offer a button that would just 400.
-  if (article.status === 'DRAFT' && hasPermission('article.delete')) {
+  // Hard-delete is only safe for a draft or an already-archived article — anything still active
+  // (reviewed/approved/published) has real editorial history the API refuses to erase (Phase 2H), so
+  // don't offer a button that would just 400. Deleting an ARCHIVED article is the more consequential
+  // of the two (it permanently erases that article's audit history, not just an unfinished draft), so
+  // the API additionally requires article.delete there even for the article's own author.
+  if ((article.status === 'DRAFT' || article.status === 'ARCHIVED') && hasPermission('article.delete')) {
     actions.push({ label: 'Delete', action: 'delete' });
   }
 
@@ -140,4 +146,55 @@ export function validateArticleDraft(input: ArticleDraftInput): string[] {
     errors.push('Title is required.');
   }
   return errors;
+}
+
+/**
+ * Autosave / draft-recovery (Phase 2L). The editor already sends `expectedUpdatedAt` on every manual
+ * save so the API rejects a stale write instead of clobbering a newer one — autosave reuses that exact
+ * same save path on a debounce timer, so these helpers only cover the piece that didn't exist before:
+ * a local safety copy that survives a crashed tab/browser between periodic autosaves, and the logic for
+ * deciding whether it is still safe to offer restoring it.
+ */
+export interface AutosaveDraft {
+  /** The server `updatedAt` this draft was edited on top of — a new/never-saved article has none. */
+  baseUpdatedAt: string | null;
+  savedAt: number;
+  fields: Record<string, unknown>;
+}
+
+/** One storage key per saved article; a brand-new, not-yet-created article has no id to key off yet,
+ * so it gets a single fixed slot instead (there is only ever one "New Article" screen open at a time). */
+export function buildAutosaveStorageKey(articleId: string | undefined): string {
+  return `bd-news-autosave-${articleId || 'new'}`;
+}
+
+export function serializeAutosaveDraft(fields: Record<string, unknown>, baseUpdatedAt: string | null): string {
+  const draft: AutosaveDraft = { baseUpdatedAt, savedAt: Date.now(), fields };
+  return JSON.stringify(draft);
+}
+
+/** Never lets a corrupt/foreign localStorage value reach the editor as real draft data. */
+export function parseAutosaveDraft(raw: string | null | undefined): AutosaveDraft | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.fields && typeof parsed.fields === 'object') {
+      return parsed as AutosaveDraft;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Only offer to restore a locally-saved draft when it was based on the exact server version that is
+ * still current. If someone else has saved a newer version since (or the article was reloaded from a
+ * different session), the local draft is stale relative to their work — silently discarding it is
+ * safer than offering to overwrite a newer save with older content. A brand-new, never-saved article
+ * has no server version to compare against, so any local draft found there is inherently safe to offer.
+ */
+export function shouldOfferDraftRecovery(draft: AutosaveDraft | null, serverUpdatedAt: string | null): boolean {
+  if (!draft) return false;
+  return draft.baseUpdatedAt === serverUpdatedAt;
 }

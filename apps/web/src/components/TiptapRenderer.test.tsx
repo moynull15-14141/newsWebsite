@@ -55,4 +55,23 @@ describe('TiptapRenderer — article body images', () => {
     expect(markup).toContain('<strong>bold</strong>');
     expect(markup).toContain('src="http://localhost/media/inline.jpg"');
   });
+
+  it('never renders a body heading as <h1> — the article title is the page\'s only h1', () => {
+    // Level 1 can still show up in saved content (older articles, a pasted Word/HTML H1, or the
+    // Markdown "# " shortcut) even though the editor toolbar no longer offers it; the public renderer
+    // must not turn that into a second <h1> on the page.
+    const content = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Should not be h1' }] },
+        { type: 'heading', content: [{ type: 'text', text: 'Missing level attr' }] },
+      ],
+    };
+    const markup = renderToStaticMarkup(<TiptapRenderer content={content} />);
+
+    expect(markup).not.toContain('<h1');
+    expect(markup).toContain('<h2');
+    expect(markup).toContain('Should not be h1');
+    expect(markup).toContain('Missing level attr');
+  });
 });

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { parsePage, parsePositiveInt } from '../../common/pagination/parse-pagination';
 
 @Controller('public')
 export class PublicCommentsController {
@@ -16,7 +17,7 @@ export class PublicCommentsController {
   @Public()
   @Get('articles/:slug/comments')
   list(@Param('slug') slug: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.commentsService.findByArticle(slug, page ? parseInt(page, 10) : 1, limit ? parseInt(limit, 10) : 50);
+    return this.commentsService.findByArticle(slug, parsePage(page), parsePositiveInt(limit, 50, 100));
   }
 
   @Public()

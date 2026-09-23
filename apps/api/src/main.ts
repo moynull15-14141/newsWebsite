@@ -4,6 +4,10 @@ import { randomUUID } from 'crypto';
 import * as express from 'express';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { buildSecurityHeaders } from './common/security/security-headers';
+import { RateLimiter, RATE_LIMIT_RULES, classifyPublicRoute } from './common/rate-limit/rate-limiter';
+import { formatRequestLog, sanitizePathForLogging } from './common/logging/request-logger';
 
 function validateEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -17,6 +21,7 @@ function validateEnvironment() {
 async function bootstrap() {
   validateEnvironment();
   const app = await NestFactory.create(AppModule);
+  const isProduction = process.env.NODE_ENV === 'production';
 
   // API prefix
   app.setGlobalPrefix('api/v1');
@@ -29,41 +34,60 @@ async function bootstrap() {
     );
   }
 
-  // CORS
+  // CORS — production requires API_CORS_ORIGIN (enforced by validateEnvironment above); the localhost
+  // fallback only ever applies when that variable is unset, i.e. local development.
   app.enableCors({
     origin: process.env.API_CORS_ORIGIN?.split(',') || ['http://localhost:5173', 'http://localhost:5174'],
     credentials: true,
   });
 
-  const requestCounts = new Map<string, { count: number; resetAt: number }>();
+  const securityHeaders = buildSecurityHeaders(isProduction);
+  // Public/pre-auth traffic only — authenticated mutations are throttled per-user by RateLimitGuard
+  // instead (see its own comment for why: req.user doesn't exist yet at the middleware stage).
+  const publicRateLimiter = new RateLimiter();
+  setInterval(() => publicRateLimiter.sweep(), 5 * 60_000).unref();
+
   app.use((request: any, response: any, next: () => void) => {
+    const start = process.hrtime.bigint();
     const requestId = request.header('x-request-id') || randomUUID();
     response.setHeader('X-Request-Id', requestId);
-    response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    response.setHeader('Content-Security-Policy-Report-Only', "default-src 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self' https:");
+    for (const [name, value] of Object.entries(securityHeaders)) response.setHeader(name, value);
+
+    const originalUrl: string = request.originalUrl || request.url;
     if (request.method === 'GET') {
-      const path = request.originalUrl || request.url;
-      if (path.includes('/public/') || path.includes('/seo/')) {
+      if (originalUrl.includes('/public/') || originalUrl.includes('/seo/')) {
         response.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-      } else if (path.includes('/auth/') || path.includes('/reader/') || path.includes('/admin') || path.includes('/articles')) {
+      } else if (originalUrl.includes('/auth/') || originalUrl.includes('/reader/') || originalUrl.includes('/admin') || originalUrl.includes('/articles')) {
         response.setHeader('Cache-Control', 'no-store');
       }
     }
 
-    const sensitive = /\/auth\/(login|refresh|forgot-password|reset-password)|\/public\/(search|articles\/[^/]+\/view|analytics\/events)|\/comments/;
-    if (sensitive.test(request.originalUrl || request.url)) {
-      const now = Date.now();
-      const key = `${request.ip}:${request.path}`;
-      const current = requestCounts.get(key);
-      if (!current || current.resetAt <= now) requestCounts.set(key, { count: 1, resetAt: now + 60_000 });
-      else if (current.count >= 60) {
-        response.status(429).json({ statusCode: 429, message: 'Too many requests' });
+    const tier = classifyPublicRoute(request.method, originalUrl);
+    if (tier) {
+      const rule = RATE_LIMIT_RULES[tier];
+      const result = publicRateLimiter.check(`${tier}:${request.ip}`, rule);
+      response.setHeader('X-RateLimit-Limit', result.limit);
+      response.setHeader('X-RateLimit-Remaining', result.remaining);
+      response.setHeader('X-RateLimit-Reset', Math.ceil(result.resetAt / 1000));
+      if (!result.allowed) {
+        response.status(429).json({ statusCode: 429, message: 'Too many requests. Please try again shortly.' });
         return;
-      } else current.count += 1;
+      }
     }
+
+    response.on('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+      // eslint-disable-next-line no-console
+      console.log(formatRequestLog({
+        requestId,
+        method: request.method,
+        path: sanitizePathForLogging(originalUrl),
+        statusCode: response.statusCode,
+        durationMs: Math.round(durationMs),
+        actorId: request.user?.userId ?? null,
+      }));
+    });
+
     next();
   });
 
@@ -75,6 +99,8 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = process.env.API_PORT || 3001;
   await app.listen(port);

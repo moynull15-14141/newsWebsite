@@ -7,6 +7,13 @@ import { TagTranslationDto } from './dto/tag-translation.dto';
 
 const TRANSLATIONS_INCLUDE = { translations: { include: { language: { select: { id: true, code: true } } } } } satisfies Prisma.TagInclude;
 
+// This endpoint is public and the un-paginated call below (used by nav/selector callers that just want
+// "the whole taxonomy") took no `take` at all — genuinely unbounded, even though in practice the tag
+// table is small and editor-curated. A hard ceiling costs nothing here and closes the "technically
+// unbounded public query" gap Phase 2M asks about, without breaking the "give me everything" contract
+// those callers rely on today.
+const UNPAGINATED_HARD_CAP = 500;
+
 @Injectable()
 export class TagsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -58,6 +65,7 @@ export class TagsService {
         ...TRANSLATIONS_INCLUDE,
       },
       orderBy: { name: 'asc' },
+      take: UNPAGINATED_HARD_CAP,
     });
   }
 

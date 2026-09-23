@@ -68,7 +68,12 @@ function ArticleMeta({ article }: { article: Article }) {
 function ArticleCategory({ category }: { category?: Article['category'] }) {
   if (!category) return null;
   return (
-    <Badge variant="category" className="mb-2">
+    // max-w-full + truncate: a safety ceiling, not a visual change for real category names (they're
+    // always short). Without it, this badge sits in a `min-w-0 flex-1` column next to a fixed-width
+    // thumbnail — `min-w-0` lets that column shrink, but the badge itself has no width limit, so at
+    // narrow tablet grid widths (3 columns) it can render wider than its shrunk column and overflow
+    // past the page edge instead of the column just clipping it.
+    <Badge variant="category" className="mb-2 max-w-full truncate">
       {category.name}
     </Badge>
   );

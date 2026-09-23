@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 
 /** Appends `?lang=` (or `&lang=`) to a `/public/*` request path — every such DTO accepts it (see PublicArticleQueryDto). */

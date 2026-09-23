@@ -286,7 +286,20 @@ describe('Phase 2F public discovery (real Aiven E2E)', () => {
     expect(response.body).toEqual(expect.objectContaining({ slug: published.slug, canonicalUrl: null, noIndex: false }));
     expectNoPrivateFields(response.body);
 
-    const translated = await prisma.article.findFirst({ where: { status: 'PUBLISHED', translationGroupId: { not: null } }, select: { slug: true } });
+    // Not every translationGroupId has more than one PUBLISHED member — some groups are a single
+    // language with no sibling yet, which legitimately renders an empty `translations` array. Picking
+    // an arbitrary group member (as this used to) made the assertion below flaky: it passed or failed
+    // depending on which group `findFirst` happened to return, not on any real behavior. Group by
+    // translationGroupId first and only exercise a group with an actual sibling to check.
+    const groups = await prisma.article.groupBy({
+      by: ['translationGroupId'],
+      where: { status: 'PUBLISHED', translationGroupId: { not: null } },
+      _count: { _all: true },
+      having: { translationGroupId: { _count: { gt: 1 } } },
+    });
+    const translated = groups.length
+      ? await prisma.article.findFirst({ where: { status: 'PUBLISHED', translationGroupId: groups[0].translationGroupId }, select: { slug: true } })
+      : null;
     if (translated) {
       const translatedResponse = await get(`/public/articles/${translated.slug}`);
       expect(translatedResponse.body.translations.length).toBeGreaterThan(0);

@@ -22,6 +22,13 @@ import LocationsPage from './pages/LocationsPage';
 import UsersPage from './pages/UsersPage';
 import LanguagesPage from './pages/LanguagesPage';
 import SeoDashboardPage from './pages/SeoDashboardPage';
+import BreakingNewsPage from './pages/BreakingNewsPage';
+import JobsDashboardPage from './pages/JobsDashboardPage';
+import JobsPage from './pages/JobsPage';
+import JobEditorPage from './pages/JobEditorPage';
+import JobCategoriesPage from './pages/JobCategoriesPage';
+import EmployersPage from './pages/EmployersPage';
+import JobApplicationsPage from './pages/JobApplicationsPage';
 
 function App() {
   return (
@@ -51,9 +58,17 @@ function App() {
         <Route path="locations" element={<LocationsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="homepage" element={<RequirePermission permission="homepage.manage"><HomepagePage /></RequirePermission>} />
+        <Route path="breaking-news" element={<RequirePermission permission="breaking_news.manage"><BreakingNewsPage /></RequirePermission>} />
         <Route path="homepage/preview" element={<RequirePermission permission="homepage.manage"><HomepagePreviewPage /></RequirePermission>} />
         <Route path="collections" element={<CollectionsPage />} />
         <Route path="languages" element={<RequirePermission permission="settings.manage"><LanguagesPage /></RequirePermission>} />
+        <Route path="jobs" element={<RequirePermission permission="job.read"><JobsDashboardPage /></RequirePermission>} />
+        <Route path="jobs/all" element={<RequirePermission permission="job.read"><JobsPage /></RequirePermission>} />
+        <Route path="jobs/new" element={<RequirePermission permission="job.create"><JobEditorPage /></RequirePermission>} />
+        <Route path="jobs/:id/edit" element={<RequirePermission permission="job.edit"><JobEditorPage /></RequirePermission>} />
+        <Route path="jobs/categories" element={<RequirePermission permission="job.manage_categories"><JobCategoriesPage /></RequirePermission>} />
+        <Route path="jobs/employers" element={<RequirePermission permission="job.manage_employers"><EmployersPage /></RequirePermission>} />
+        <Route path="jobs/applications" element={<RequirePermission permission="job_application.view"><JobApplicationsPage /></RequirePermission>} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

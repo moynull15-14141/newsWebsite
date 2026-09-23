@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query, Post, Body } from '@nestjs/common';
 import { PublicService } from './public.service';
 import { PublicArticleQueryDto } from './dto/public-query.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { parsePositiveInt } from '../../common/pagination/parse-pagination';
 
 @Controller('public')
 export class PublicController {
@@ -82,7 +83,7 @@ export class PublicController {
   @Public()
   @Get('breaking-news')
   getBreakingNews(@Query('limit') limit?: string, @Query('lang') lang?: string) {
-    return this.publicService.getBreakingNews(limit ? parseInt(limit, 10) : 5, lang);
+    return this.publicService.getBreakingNews(parsePositiveInt(limit, 5, 20), lang);
   }
 
   @Public()
@@ -117,7 +118,7 @@ export class PublicController {
   ) {
     return this.publicService.getMostRead({
       window: window || '24h',
-      limit: limit ? parseInt(limit, 10) : 10,
+      limit: parsePositiveInt(limit, 10, 50),
       lang,
     });
   }
@@ -131,7 +132,7 @@ export class PublicController {
   ) {
     return this.publicService.getTrending({
       locationSlug: location,
-      limit: limit ? parseInt(limit, 10) : 10,
+      limit: parsePositiveInt(limit, 10, 50),
       lang,
     });
   }

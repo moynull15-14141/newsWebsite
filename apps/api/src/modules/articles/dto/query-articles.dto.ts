@@ -37,6 +37,10 @@ export class QueryArticlesDto {
 
   @IsOptional()
   @IsString()
+  assigneeId?: string;
+
+  @IsOptional()
+  @IsString()
   tagId?: string;
 
   @IsOptional()

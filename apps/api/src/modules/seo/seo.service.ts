@@ -18,7 +18,29 @@ export class SeoService {
   }
 
   getSitemapIndex() {
-    return this.toIndexXml(['page-sitemap.xml', 'article-sitemap.xml', 'category-sitemap.xml', 'tag-sitemap.xml', 'author-sitemap.xml', 'location-sitemap.xml', 'news-sitemap.xml']);
+    return this.toIndexXml(['page-sitemap.xml', 'article-sitemap.xml', 'category-sitemap.xml', 'tag-sitemap.xml', 'author-sitemap.xml', 'location-sitemap.xml', 'news-sitemap.xml', 'job-sitemap.xml']);
+  }
+
+  /** Same cursor-paginated shape as getArticleSitemap — only PUBLISHED jobs whose deadline hasn't
+   * passed (a job the eligibility check would already exclude from public listings has no business
+   * being indexable either; see job-eligibility.ts's publicJobWhere, mirrored here at the DB level
+   * rather than imported, since Prisma's generated WhereInput types differ per model). */
+  async getJobSitemap() {
+    const now = new Date();
+    const urls: SitemapUrl[] = [];
+    let cursor: string | undefined;
+    do {
+      const jobs = await this.prisma.job.findMany({
+        where: { status: 'PUBLISHED', OR: [{ publishedAt: null }, { publishedAt: { lte: now } }], AND: [{ OR: [{ deadline: null }, { deadline: { gt: now } }] }] },
+        select: { id: true, slug: true, updatedAt: true },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      urls.push(...jobs.map((job) => ({ loc: `/jobs/${job.slug}`, lastmod: job.updatedAt })));
+      cursor = jobs.length === 500 ? jobs[jobs.length - 1].id : undefined;
+    } while (cursor);
+    return this.toUrlXml(urls);
   }
 
   getPageSitemap() { return this.toUrlXml([{ loc: '/' }, { loc: '/latest' }, { loc: '/bangladesh' }]); }

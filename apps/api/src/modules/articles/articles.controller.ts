@@ -6,6 +6,8 @@ import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { QueryArticlesDto } from './dto/query-articles.dto';
 import { CreateTranslationDto } from './dto/create-translation.dto';
+import { AssignArticleDto } from './dto/assign-article.dto';
+import { UpdateRelatedArticlesDto } from './dto/update-related-articles.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -32,8 +34,8 @@ export class ArticlesController {
   @Get('stats')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('analytics.view')
-  getStats() {
-    return this.articlesService.getStats();
+  getStats(@CurrentUser('userId') userId: string) {
+    return this.articlesService.getStats(userId);
   }
 
   // Admin-only lookups by id/slug — regardless of status. The public site never calls these; it goes
@@ -75,6 +77,24 @@ export class ArticlesController {
     return this.articlesService.getReadiness(id);
   }
 
+  @Get(':id/related')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.read')
+  getManualRelated(@Param('id') id: string) {
+    return this.articlesService.getRelatedManagement(id);
+  }
+
+  @Patch(':id/related')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.review')
+  updateManualRelated(
+    @Param('id') id: string,
+    @Body() dto: UpdateRelatedArticlesDto,
+    @CurrentUser('userId') userId: string,
+  ) {
+    return this.articlesService.updateManualRelated(id, dto.relatedArticleIds, userId);
+  }
+
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RequirePermissions('article.edit')
@@ -102,8 +122,8 @@ export class ArticlesController {
 
   @Post(':id/submit-review')
   @UseGuards(JwtAuthGuard)
-  submitReview(@Param('id') id: string, @CurrentUser('userId') userId: string) {
-    return this.articlesService.submitReview(id, userId);
+  submitReview(@Param('id') id: string, @CurrentUser('userId') userId: string, @Req() req: any) {
+    return this.articlesService.submitReview(id, userId, req.user?.permissions || []);
   }
 
   @Post(':id/approve')
@@ -146,6 +166,13 @@ export class ArticlesController {
   @RequirePermissions('article.review')
   returnToDraft(@Param('id') id: string, @CurrentUser('userId') userId: string, @Body('reason') reason?: string) {
     return this.articlesService.returnToDraft(id, userId, reason);
+  }
+
+  @Post(':id/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @RequirePermissions('article.review')
+  assign(@Param('id') id: string, @Body() dto: AssignArticleDto, @CurrentUser('userId') userId: string) {
+    return this.articlesService.assign(id, dto.assigneeId, dto.note, userId);
   }
 
   @Post(':id/revisions')

@@ -1,4 +1,4 @@
-import { PrismaClient, UserStatus, LocationType, CategoryStatus, TagStatus, ArticleStatus } from '../node_modules/.prisma/client';
+import { PrismaClient, UserStatus, LocationType, CategoryStatus, TagStatus, ArticleStatus, JobCategoryStatus } from '../node_modules/.prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { validateProductionSeedPassword, isKnownDemoPassword } from '../apps/api/src/common/security/seed-password';
 import {
@@ -70,6 +70,17 @@ async function main() {
     { name: 'ad.manage', description: 'Manage advertisements' },
     { name: 'collection.manage', description: 'Manage editorial collections' },
     { name: 'homepage.manage', description: 'Manage homepage editorial sections' },
+    { name: 'breaking_news.manage', description: 'Manage the public breaking-news ticker' },
+    { name: 'job.create', description: 'Create new job postings' },
+    { name: 'job.read', description: 'Read job postings, including unpublished ones' },
+    { name: 'job.edit', description: 'Edit existing job postings' },
+    { name: 'job.review', description: 'Review job postings for publication' },
+    { name: 'job.publish', description: 'Publish, schedule, and archive job postings' },
+    { name: 'job.delete', description: 'Delete job postings' },
+    { name: 'job.manage_categories', description: 'Manage job categories' },
+    { name: 'job.manage_employers', description: 'Manage employer/company records' },
+    { name: 'job_application.view', description: 'View job applications' },
+    { name: 'job_application.manage', description: 'Manage job application status and notes' },
   ];
 
   const permissions: Record<string, string> = {};
@@ -87,10 +98,10 @@ async function main() {
   console.log('\n🔗 Seeding role permissions...');
   const rolePermissionsMap: Record<string, string[]> = {
     'Super Admin': Object.keys(permissions),
-    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage'],
-    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view'],
-    'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'audit.read', 'media.upload', 'analytics.view'],
-    'Reporter': ['article.create', 'article.read', 'article.edit', 'media.upload'],
+    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.delete', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage'],
+    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage'],
+    'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'audit.read', 'media.upload', 'analytics.view', 'job.create', 'job.read', 'job.edit', 'job.review', 'job_application.view'],
+    'Reporter': ['article.create', 'article.read', 'article.edit', 'media.upload', 'job.create', 'job.read', 'job.edit'],
     'Photographer': ['article.create', 'article.read', 'media.upload', 'media.manage'],
     'Contributor': ['article.create', 'article.read'],
     'Moderator': ['article.read', 'article.review', 'media.manage', 'comment.moderate'],
@@ -348,6 +359,37 @@ async function main() {
       });
     }
     console.log(`  ✓ Category: ${cat.name} (${cat.nameBn})`);
+  }
+
+  // ==================== JOB CATEGORIES ====================
+  // Its own flat taxonomy, deliberately separate from the news Category tree above (see JobCategory's
+  // doc comment in schema.prisma) — reference data genuinely required to launch the Jobs platform with
+  // a usable category filter, not demo content.
+  console.log('\n💼 Seeding job categories...');
+  const jobCategoryData = [
+    { name: 'Government', slug: 'government', sortOrder: 1 },
+    { name: 'Private', slug: 'private', sortOrder: 2 },
+    { name: 'Bank', slug: 'bank', sortOrder: 3 },
+    { name: 'NGO', slug: 'ngo', sortOrder: 4 },
+    { name: 'Education', slug: 'education-jobs', sortOrder: 5 },
+    { name: 'IT & Software', slug: 'it-software', sortOrder: 6 },
+    { name: 'Healthcare', slug: 'healthcare', sortOrder: 7 },
+    { name: 'Engineering', slug: 'engineering', sortOrder: 8 },
+    { name: 'Sales & Marketing', slug: 'sales-marketing', sortOrder: 9 },
+    { name: 'Accounting & Finance', slug: 'accounting-finance', sortOrder: 10 },
+    { name: 'Garments & Textile', slug: 'garments-textile', sortOrder: 11 },
+    { name: 'Hospitality', slug: 'hospitality', sortOrder: 12 },
+    { name: 'Internship', slug: 'internship', sortOrder: 13 },
+    { name: 'Remote', slug: 'remote-jobs', sortOrder: 14 },
+    { name: 'Other', slug: 'other-jobs', sortOrder: 15 },
+  ];
+  for (const cat of jobCategoryData) {
+    await prisma.jobCategory.upsert({
+      where: { slug: cat.slug },
+      update: { name: cat.name, sortOrder: cat.sortOrder },
+      create: { name: cat.name, slug: cat.slug, status: JobCategoryStatus.ACTIVE, sortOrder: cat.sortOrder },
+    });
+    console.log(`  ✓ Job category: ${cat.name}`);
   }
 
   // ==================== TAGS ====================
@@ -1235,6 +1277,7 @@ async function main() {
     prisma.tag.count(),
     prisma.article.count(),
     prisma.articleTag.count(),
+    prisma.jobCategory.count(),
   ]);
 
   console.log('\n✅ Seed completed successfully!');
@@ -1247,6 +1290,7 @@ async function main() {
   console.log(`   Tags: ${counts[6]}`);
   console.log(`   Articles: ${counts[7]} (12 original + 5 district + 1 breaking + 1 scheduled + 1 bn/en pair + 1 bn-only)`);
   console.log(`   Article-Tags: ${counts[8]}`);
+  console.log(`   Job categories: ${counts[9]}`);
   console.log('   Admin user seeded without printing credentials.');
 }
 
