@@ -7,13 +7,13 @@ import { applyTheme, getThemePreference, initializeTheme } from './theme';
 // module-level state, so minimal hand-rolled stubs per test are enough.
 function installDomStubs() {
   const store = new Map<string, string>();
-  (globalThis as any).localStorage = {
+  (globalThis as unknown as Record<string, unknown>).localStorage = {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => store.set(key, value),
     clear: () => store.clear(),
   };
   const classes = new Set<string>();
-  (globalThis as any).document = {
+  (globalThis as unknown as Record<string, unknown>).document = {
     documentElement: {
       classList: {
         toggle: (name: string, force?: boolean) => {
@@ -30,7 +30,7 @@ function installDomStubs() {
 describe('theme', () => {
   beforeEach(() => {
     installDomStubs();
-    (globalThis as any).matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn() });
+    (globalThis as unknown as Record<string, unknown>).matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn() });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -67,7 +67,7 @@ describe('theme', () => {
     });
 
     it('follows the OS preference for SYSTEM', () => {
-      (globalThis as any).matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn() });
+      (globalThis as unknown as Record<string, unknown>).matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn() });
       applyTheme('SYSTEM');
       expect(document.documentElement.classList.contains('dark')).toBe(true);
     });
@@ -77,7 +77,7 @@ describe('theme', () => {
     it('applies the stored preference on load and listens for OS changes', () => {
       localStorage.setItem('news-theme', 'DARK');
       const addEventListener = vi.fn();
-      (globalThis as any).matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener });
+      (globalThis as unknown as Record<string, unknown>).matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener });
 
       initializeTheme();
 

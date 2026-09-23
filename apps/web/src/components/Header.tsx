@@ -40,6 +40,11 @@ interface BreakingArticle {
   slug: string;
 }
 
+interface ReaderProfileSummary {
+  name: string;
+  readerProfile?: { avatar?: { publicUrl: string } | null } | null;
+}
+
 /** Reader-facing "বাংলা | English" toggle. A real <Link> to the equivalent page in the other language — crawlable, works without JS, and never loses the reader's place. */
 function LanguageSwitcher() {
   const location = useLocation();
@@ -115,6 +120,17 @@ export default function Header() {
 
   const breakingCount = breakingNews?.length || 0;
 
+  // Same queryKey as ReaderProfilePage's /reader/me fetch, so the two share one cached request instead of
+  // the header firing a redundant call whenever the profile page is also mounted.
+  const { data: profile } = useQuery<ReaderProfileSummary>({
+    queryKey: ['reader-profile'],
+    queryFn: () => apiFetch('/reader/me'),
+    enabled: !!user,
+    staleTime: 5 * 60_000,
+  });
+  const avatarUrl = profile?.readerProfile?.avatar?.publicUrl;
+  const initial = (user?.name || '?').trim().charAt(0).toUpperCase();
+
   // Real taxonomy, not a hardcoded list — GET /categories is already public and sortOrder-ordered
   // (editors control that order in the Admin Categories page), so the nav follows editorial curation.
   const { data: categories } = useQuery<NavCategory[]>({
@@ -167,54 +183,93 @@ export default function Header() {
             )}
           </Link>
 
-          <nav aria-label={t('header.primaryNav')} className="hidden items-center gap-1 lg:flex">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                to={link(item.href)}
-                aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
-                className={`nav rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <IconButton
-              variant="default"
-              size="md"
-              aria-label={controlLabels.search}
-              aria-expanded={searchOpen}
-              aria-controls="site-search"
-              onClick={() => setSearchOpen(!searchOpen)}
-            >
-              <Search size={20} />
-            </IconButton>
-            {!user ? (
-              <div className="hidden items-center gap-2 sm:flex">
-                <Link to={link('/login')} className="rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100">
-                  {t('common.signIn')}
-                </Link>
-                <Link to={link('/register')} className="rounded bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600">
-                  {t('auth.register')}
-                </Link>
-              </div>
-            ) : (
-              <div className="relative hidden sm:block">
-                <button
-                  type="button"
-                  onClick={() => setAccountOpen((open) => !open)}
-                  aria-expanded={accountOpen}
-                  aria-controls="reader-account-menu"
-                  className="flex items-center gap-2 rounded-full border border-neutral-200 px-3 py-2 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-600"
+          {/* Nav + search + account cluster together on the right, instead of `justify-between` spreading
+              three loose groups across the whole bar and leaving awkward empty gaps on wide screens. */}
+          <div className="ml-auto flex items-center gap-4">
+            <nav aria-label={t('header.primaryNav')} className="hidden items-center gap-1 xl:flex">
+              {navItems.map((item) => (
+                <Link
+                  key={item.href}
+                  to={link(item.href)}
+                  aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
+                  className={`nav rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
                 >
-                  <UserRound size={18} />
-                  <span className="max-w-32 truncate">{user.name}</span>
-                  <ChevronDown size={15} />
-                </button>
-                {accountOpen && (
-                  <nav id="reader-account-menu" aria-label={t('common.account')} className="absolute right-0 mt-2 w-52 rounded-lg border border-neutral-200 bg-white p-2 shadow-lg">
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+
+            {/* Always-visible search field on larger screens, so it reads as "type here to search" rather
+                than a bare icon the reader has to guess at; collapses to the icon toggle below xl. */}
+            <form onSubmit={handleSearch} className="hidden xl:block">
+              <label htmlFor="site-search-inline" className="sr-only">{t('header.searchAria')}</label>
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  id="site-search-inline"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('common.searchArticles')}
+                  maxLength={200}
+                  className="w-48 rounded-full border border-neutral-300 bg-neutral-50 py-2 pl-9 pr-3 text-sm transition-colors focus:w-64 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+              </div>
+            </form>
+
+            <div className="flex items-center gap-2">
+              <IconButton
+                variant="default"
+                size="md"
+                aria-label={controlLabels.search}
+                aria-expanded={searchOpen}
+                aria-controls="site-search"
+                onClick={() => setSearchOpen(!searchOpen)}
+                className="xl:hidden"
+              >
+                <Search size={20} />
+              </IconButton>
+              <Link to={link('/employer')} className="hidden rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 md:block">
+                {t('nav.forEmployers')}
+              </Link>
+              {!user ? (
+                <div className="hidden items-center gap-2 sm:flex">
+                  <Link to={link('/login')} className="rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100">
+                    {t('common.signIn')}
+                  </Link>
+                  <Link to={link('/register')} className="rounded bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600">
+                    {t('auth.register')}
+                  </Link>
+                </div>
+              ) : (
+                <div className="relative hidden sm:block">
+                  <button
+                    type="button"
+                    onClick={() => setAccountOpen((open) => !open)}
+                    aria-expanded={accountOpen}
+                    aria-controls="reader-account-menu"
+                    className="flex items-center gap-2 rounded-full border border-neutral-200 py-1 pl-1 pr-3 text-sm font-semibold text-neutral-700 transition-colors hover:border-primary-300 hover:text-primary-600"
+                  >
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
+                        {initial}
+                      </span>
+                    )}
+                    <span className="max-w-32 truncate">{user.name}</span>
+                    <ChevronDown size={15} className={`transition-transform duration-200 ${accountOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {/* Kept mounted (not conditionally rendered) so opacity/scale can transition instead of
+                      the menu just popping in and out. */}
+                  <nav
+                    id="reader-account-menu"
+                    aria-label={t('common.account')}
+                    hidden={!accountOpen}
+                    className={`absolute right-0 z-10 mt-2 w-56 origin-top-right rounded-lg border border-neutral-200 bg-white p-2 shadow-lg transition duration-150 ease-out ${
+                      accountOpen ? 'scale-100 opacity-100' : 'pointer-events-none scale-95 opacity-0'
+                    }`}
+                  >
                     {[
                       ['/account', t('common.account')],
                       ['/account/profile', t('account.profile')],
@@ -229,42 +284,42 @@ export default function Header() {
                       <LogOut size={16} /> Logout
                     </button>
                   </nav>
-                )}
-              </div>
-            )}
-            {user && (
+                </div>
+              )}
+              {user && (
+                <Link
+                  to={link('/account/notifications')}
+                  className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-200"
+                  aria-label={t('common.notifications')}
+                >
+                  <Bell size={19} />
+                </Link>
+              )}
+
               <Link
-                to={link('/account/notifications')}
-                className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-200"
-                aria-label={t('common.notifications')}
+                to={link(user ? '/account' : '/login')}
+                className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 sm:hidden"
+                aria-label={user ? t('common.account') : t('common.signIn')}
               >
-                <Bell size={19} />
+                <UserRound size={19} />
               </Link>
-            )}
 
-            <Link
-              to={link(user ? '/account' : '/login')}
-              className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-primary-500 sm:hidden"
-              aria-label={user ? t('common.account') : t('common.signIn')}
-            >
-              <UserRound size={19} />
-            </Link>
-
-            <IconButton
-              variant="default"
-              size="md"
-              aria-label={controlLabels.menu}
-              aria-expanded={mobileOpen}
-              aria-controls="mobile-navigation"
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="lg:hidden"
-            >
-              {mobileOpen ? <X size={22} /> : <Menu size={22} />}
-            </IconButton>
+              <IconButton
+                variant="default"
+                size="md"
+                aria-label={controlLabels.menu}
+                aria-expanded={mobileOpen}
+                aria-controls="mobile-navigation"
+                onClick={() => setMobileOpen(!mobileOpen)}
+                className="xl:hidden"
+              >
+                {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+              </IconButton>
+            </div>
           </div>
         </div>
 
-        <div id="site-search" hidden={!searchOpen} className="border-t border-neutral-100 py-3">
+        <div id="site-search" hidden={!searchOpen} className="border-t border-neutral-100 py-3 xl:hidden">
             <form onSubmit={handleSearch} className="flex gap-2">
               <input
                 type="text"
@@ -286,7 +341,7 @@ export default function Header() {
           id="mobile-navigation"
           aria-label={t('header.primaryNav')}
           hidden={!mobileOpen}
-          className="border-t border-neutral-100 py-3 lg:hidden"
+          className="border-t border-neutral-100 py-3 xl:hidden"
         >
             {navItems.map((item) => (
               <Link
@@ -300,6 +355,7 @@ export default function Header() {
               </Link>
             ))}
             <div className="mt-3 border-t border-neutral-200 pt-3">
+              <Link to={link('/employer')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 font-semibold text-neutral-700">{t('nav.forEmployers')}</Link>
               {user ? (
                 <>
                   <Link to={link('/account')} onClick={() => setMobileOpen(false)} className="block rounded px-3 py-2.5 font-semibold text-primary-600">{t('common.account')}</Link>

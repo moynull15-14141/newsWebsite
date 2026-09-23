@@ -19,6 +19,16 @@ import { ReaderProfilePage, ReaderSettingsPage } from './pages/ReaderProfileSett
 import JobsListPage from './pages/JobsListPage';
 import JobDetailPage from './pages/JobDetailPage';
 import { SavedJobsPage, JobApplicationsPage } from './pages/ReaderJobsPages';
+import EmployerLayout from './pages/employer/EmployerLayout';
+import EmployerOnboardingPage from './pages/employer/EmployerOnboardingPage';
+import EmployerDashboardPage from './pages/employer/EmployerDashboardPage';
+import EmployerJobsPage from './pages/employer/EmployerJobsPage';
+import EmployerJobFormPage from './pages/employer/EmployerJobFormPage';
+import EmployerApplicationsPage from './pages/employer/EmployerApplicationsPage';
+import EmployerApplicationDetailPage from './pages/employer/EmployerApplicationDetailPage';
+import EmployerTeamPage from './pages/employer/EmployerTeamPage';
+import EmployerCompanyPage from './pages/employer/EmployerCompanyPage';
+import EmployerBillingPage from './pages/employer/EmployerBillingPage';
 
 /**
  * Content routes, shared between the default (bare) language and every prefixed one (`/en`). Keeping
@@ -46,6 +56,29 @@ function contentRoutes() {
     <Route key="jobs" path="jobs" element={<JobsListPage />} />,
     <Route key="job" path="jobs/:slug" element={<JobDetailPage />} />,
     <Route key="not-found" path="*" element={<NotFoundPage />} />,
+  ];
+}
+
+/**
+ * Employer portal routes, shared between the default language and `/en` — same rationale as
+ * `contentRoutes()` above. `onboarding` has its own auth/registration gating (any signed-in reader may
+ * reach it); every other page is nested under `EmployerLayout`, which additionally requires an active
+ * employer membership and redirects to onboarding otherwise.
+ */
+function employerRoutes() {
+  return [
+    <Route key="employer-onboarding" path="onboarding" element={<EmployerOnboardingPage />} />,
+    <Route key="employer-portal" element={<EmployerLayout />}>
+      <Route key="dashboard" index element={<EmployerDashboardPage />} />
+      <Route key="jobs" path="jobs" element={<EmployerJobsPage />} />
+      <Route key="jobs-new" path="jobs/new" element={<EmployerJobFormPage />} />
+      <Route key="jobs-edit" path="jobs/:id/edit" element={<EmployerJobFormPage />} />
+      <Route key="applications" path="applications" element={<EmployerApplicationsPage />} />
+      <Route key="application-detail" path="applications/:id" element={<EmployerApplicationDetailPage />} />
+      <Route key="team" path="team" element={<EmployerTeamPage />} />
+      <Route key="company" path="company" element={<EmployerCompanyPage />} />
+      <Route key="billing" path="billing" element={<EmployerBillingPage />} />
+    </Route>,
   ];
 }
 
@@ -98,6 +131,13 @@ function App() {
           <Route path="applications" element={<JobApplicationsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="settings" element={<ReaderSettingsPage />} />
+        </Route>
+
+        <Route path="/employer" element={<MainLayout />}>
+          {employerRoutes()}
+        </Route>
+        <Route path="/en/employer" element={<MainLayout />}>
+          {employerRoutes()}
         </Route>
       </Routes>
     </LanguageProvider>

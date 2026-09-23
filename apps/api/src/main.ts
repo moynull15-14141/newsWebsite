@@ -16,6 +16,17 @@ function validateEnvironment() {
     if (missing.length) throw new Error(`Missing production configuration: ${missing.join(', ')}`);
     if (process.env.STORAGE_PROVIDER === 'local') throw new Error('Production requires STORAGE_PROVIDER=s3');
   }
+
+  // Fail fast rather than risk another database-safety incident (see docs/DATABASE-SAFETY.md):
+  // SHADOW_DATABASE_URL/TEST_DATABASE_URL/STAGING_DATABASE_URL must never resolve to the same database
+  // as DATABASE_URL — Prisma resets whatever it is told is the shadow database.
+  const dbUrl = process.env.DATABASE_URL;
+  for (const key of ['SHADOW_DATABASE_URL', 'TEST_DATABASE_URL', 'STAGING_DATABASE_URL']) {
+    const value = process.env[key];
+    if (dbUrl && value && value === dbUrl) {
+      throw new Error(`${key} must not be set to the same value as DATABASE_URL — see docs/DATABASE-SAFETY.md`);
+    }
+  }
 }
 
 async function bootstrap() {

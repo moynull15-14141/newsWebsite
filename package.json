@@ -18,6 +18,7 @@
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:seed": "prisma db seed --schema prisma/schema.prisma",
+    "db:seed:production": "node scripts/seed-production.js",
     "db:verify-seed": "node prisma/verify-seed.js",
     "db:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-postgres.ps1",
     "db:restore:verify": "powershell -ExecutionPolicy Bypass -File scripts/restore-verify-postgres.ps1",

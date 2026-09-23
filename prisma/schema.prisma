@@ -59,9 +59,15 @@ enum HomepageSourceType {
   LOCATION
 }
 
+// SAFETY: shadowDatabaseUrl MUST point at a separate, disposable database — never DATABASE_URL. Prisma
+// resets whatever database this URL points to when computing a migration diff. See
+// docs/DATABASE-SAFETY.md. If SHADOW_DATABASE_URL is unset, Prisma falls back to creating/dropping a
+// temporary database on the same server automatically for local dev; it must still never be set to a
+// production connection string.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 // ==================== ENUMS ====================
@@ -186,6 +192,54 @@ enum JobCategoryStatus {
 enum EmployerStatus {
   ACTIVE
   INACTIVE
+  SUSPENDED
+}
+
+/// Phase 2P: separate from EmployerStatus (account-level active/inactive/suspended) — this tracks
+/// whether Admin has confirmed the company is a real, legitimate organization. An unverified employer
+/// can still use the dashboard/drafts, but published jobs remain gated by the normal job.publish
+/// permission regardless of verification, so this never becomes a second bypass path.
+enum EmployerVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+/// Company-team roles for self-service employer accounts (Phase 2P) — deliberately its own small
+/// enum/model rather than reusing the platform Role/Permission system: an employer's "ADMIN" must never
+/// be confused with a platform Admin, and giving every company its own Role rows would pollute the
+/// global RBAC tables. See EmployerMembership.
+enum EmployerMembershipRole {
+  OWNER
+  ADMIN
+  RECRUITER
+}
+
+/// Lifecycle of a single EmployerMembership row. INVITED = created by an OWNER/ADMIN but not yet
+/// accepted by the invited user; ACTIVE = accepted and usable to authorize employer-portal actions;
+/// SUSPENDED = temporarily blocked (reserved for future use, not yet set by any endpoint in this phase);
+/// REMOVED = soft-deleted, kept for audit history instead of a hard delete.
+enum EmployerMembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum JobPostingPlanType {
+  FREE
+  PAID
+}
+
+/// Mirrors the shape any future real gateway integration (bKash/Nagad/card) will need — an order is
+/// never marked SUCCEEDED by this codebase itself (Phase 2P ships no live gateway), only PENDING/
+/// FAILED/CANCELLED are reachable without manual, permissioned intervention. See JobPostingOrder.
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  CANCELLED
 }
 
 enum EmploymentType {
@@ -269,6 +323,11 @@ model User {
   jobApplications    JobApplication[]
   reviewedApplications JobApplication[] @relation("ApplicationReviewer")
   createdEmployers   Employer[]
+  verifiedEmployers    Employer[]           @relation("EmployerVerifiedBy")
+  employerMemberships  EmployerMembership[]
+  invitedEmployerMemberships EmployerMembership[] @relation("EmployerMembershipInvitedBy")
+  createdJobPostingOrders JobPostingOrder[]
+  employerAuditLogEntries EmployerAuditLog[]
 
   @@map("users")
 }
@@ -639,6 +698,7 @@ model Media {
   collectionCovers EditorialCollection[]
   readerAvatars    ReaderProfile[]       @relation("ReaderAvatar")
   employerLogos    Employer[]            @relation("EmployerLogo")
+  employerCovers   Employer[]            @relation("EmployerCover")
 }
 
 model ReaderProfile {
@@ -1203,26 +1263,143 @@ model Employer {
   name         String
   slug         String         @unique
   logoMediaId  String?        @map("logo_media_id")
+  coverMediaId String?        @map("cover_media_id")
   website      String?
   description  String?
   industry     String?
+  companySize  String?        @map("company_size")
+  foundedYear  Int?           @map("founded_year")
   locationId   String?        @map("location_id")
   contactEmail String?        @map("contact_email")
   contactPhone String?        @map("contact_phone")
   status       EmployerStatus @default(ACTIVE)
+
+  // Phase 2P: self-service employer accounts. An admin-created (Phase 2O) employer has no members and
+  // isSelfService=false; registering "I'm hiring" creates the Employer with isSelfService=true and an
+  // OWNER EmployerMembership in the same transaction. Both kinds share one Job table — ownership for
+  // authorization purposes is always derived from EmployerMembership, never a job/employer type flag.
+  isSelfService      Boolean                     @default(false) @map("is_self_service")
+  verificationStatus EmployerVerificationStatus  @default(PENDING) @map("verification_status")
+  verificationNote   String?                     @map("verification_note")
+  verifiedAt         DateTime?                   @map("verified_at")
+  verifiedById       String?                     @map("verified_by_id")
+
   createdById  String?        @map("created_by_id")
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
-  logo      Media?    @relation("EmployerLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
-  location  Location? @relation(fields: [locationId], references: [id])
-  createdBy User?     @relation(fields: [createdById], references: [id])
-  jobs      Job[]
+  logo        Media?               @relation("EmployerLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  cover       Media?               @relation("EmployerCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
+  location    Location?            @relation(fields: [locationId], references: [id])
+  createdBy   User?                @relation(fields: [createdById], references: [id])
+  verifiedBy  User?                @relation("EmployerVerifiedBy", fields: [verifiedById], references: [id])
+  jobs        Job[]
+  memberships EmployerMembership[]
+  orders      JobPostingOrder[]
+  auditLogs   EmployerAuditLog[]
 
   @@index([slug])
   @@index([status])
   @@index([logoMediaId])
+  @@index([verificationStatus])
   @@map("employers")
+}
+
+/// Append-only audit trail for employer/company/verification/platform-setting events that are NOT
+/// scoped to a single job (JobAuditLog already covers job-scoped events like SUBMITTED/APPROVED). A
+/// null employerId records a platform-wide event (e.g. a feature-flag toggle by Super Admin).
+model EmployerAuditLog {
+  id         String   @id @default(uuid())
+  employerId String?  @map("employer_id")
+  actorId    String?  @map("actor_id")
+  action     String
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  actor    User?     @relation(fields: [actorId], references: [id])
+
+  @@index([employerId, createdAt])
+  @@index([action, createdAt])
+  @@map("employer_audit_logs")
+}
+
+/// Links a User to the Employer they can act on behalf of (Phase 2P). This — not any field on Job or
+/// on the User itself — is the single source of truth for "which company does this person work for /
+/// can this person manage". Every employer-scoped API derives employerId by looking up the caller's
+/// membership row(s), never from a client-supplied employerId/companyId (IDOR prevention).
+model EmployerMembership {
+  id          String                    @id @default(uuid())
+  employerId  String                    @map("employer_id")
+  userId      String                    @map("user_id")
+  role        EmployerMembershipRole    @default(RECRUITER)
+  status      EmployerMembershipStatus  @default(ACTIVE) @map("status")
+  invitedById String?                   @map("invited_by_id")
+  invitedAt   DateTime?                 @map("invited_at")
+  createdAt   DateTime                  @default(now()) @map("created_at")
+  updatedAt   DateTime                  @updatedAt @map("updated_at")
+
+  employer  Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User?    @relation("EmployerMembershipInvitedBy", fields: [invitedById], references: [id])
+
+  @@unique([employerId, userId])
+  @@index([userId])
+  @@index([employerId])
+  @@map("employer_memberships")
+}
+
+/// A postable plan an employer can choose when creating/promoting a job (Phase 2P monetization
+/// foundation). FREE plans have no price; PAID plans carry the amount a real gateway would charge.
+/// Purely a catalog/config row — choosing a paid plan does not itself grant anything; see
+/// JobPostingOrder for the payment-state machine that actually gates featured placement.
+model JobPostingPlan {
+  id            String             @id @default(uuid())
+  key           String             @unique
+  name          String
+  type          JobPostingPlanType
+  priceAmount   Int?               @map("price_amount")
+  priceCurrency String?            @default("BDT") @map("price_currency")
+  durationDays  Int                @map("duration_days")
+  isFeatured    Boolean            @default(false) @map("is_featured")
+  isActive      Boolean            @default(true) @map("is_active")
+  sortOrder     Int                @default(0) @map("sort_order")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  orders JobPostingOrder[]
+
+  @@map("job_posting_plans")
+}
+
+/// One order per (job, plan) selection. Never created as SUCCEEDED by application code — with no live
+/// payment gateway wired up in this phase, every order this codebase creates stays PENDING (or is
+/// explicitly CANCELLED/FAILED); SUCCEEDED/REFUNDED are reachable only through a future gateway
+/// webhook or an explicit, permissioned admin action, never automatically from job creation.
+model JobPostingOrder {
+  id          String        @id @default(uuid())
+  jobId       String        @map("job_id")
+  employerId  String        @map("employer_id")
+  planId      String        @map("plan_id")
+  amount      Int
+  currency    String        @default("BDT")
+  status      PaymentStatus @default(PENDING)
+  provider    String?
+  providerRef String?       @map("provider_ref")
+  createdById String        @map("created_by_id")
+  paidAt      DateTime?     @map("paid_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  job       Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  employer  Employer       @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  plan      JobPostingPlan @relation(fields: [planId], references: [id])
+  createdBy User           @relation(fields: [createdById], references: [id])
+
+  @@index([employerId])
+  @@index([jobId])
+  @@index([status])
+  @@map("job_posting_orders")
 }
 
 /// Mirrors Article's shape closely (Json rich-text fields, the same DRAFT→...→PUBLISHED→ARCHIVED
@@ -1278,6 +1455,7 @@ model Job {
   applications JobApplication[]
   savedBy      SavedJob[]
   auditLogs    JobAuditLog[]
+  postingOrders JobPostingOrder[]
 
   @@index([slug])
   @@index([status])

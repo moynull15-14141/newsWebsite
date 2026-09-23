@@ -18,8 +18,15 @@ const prisma = new PrismaClient();
 const isProduction = process.env.NODE_ENV === 'production';
 const isDevelopment = process.env.NODE_ENV === 'development';
 
+// SEED_SYSTEM_DATA_ONLY=true skips every demo/sample article section below, leaving only roles,
+// permissions, languages, locations, categories, tags, and the initial Super Admin — the set safe to
+// run against a real production database. Used by `npm run db:seed:production`
+// (scripts/seed-production.js). Local/dev seeding without this flag is unchanged and still seeds the
+// full demo dataset for a realistic local UI.
+const systemDataOnly = process.env.SEED_SYSTEM_DATA_ONLY === 'true';
+
 async function main() {
-  console.log('🌱 Starting seed...\n');
+  console.log(systemDataOnly ? '🌱 Starting seed (system-data-only mode — no demo articles)...\n' : '🌱 Starting seed...\n');
 
   if (isProduction) validateProductionSeedPassword(process.env.SEED_ADMIN_PASSWORD);
   else if (isDevelopment && (!process.env.SEED_ADMIN_PASSWORD || isKnownDemoPassword(process.env.SEED_ADMIN_PASSWORD))) {
@@ -81,6 +88,10 @@ async function main() {
     { name: 'job.manage_employers', description: 'Manage employer/company records' },
     { name: 'job_application.view', description: 'View job applications' },
     { name: 'job_application.manage', description: 'Manage job application status and notes' },
+    { name: 'employer.verify', description: 'Verify or reject self-service employer accounts' },
+    { name: 'employer.suspend', description: 'Suspend or reactivate employer accounts' },
+    { name: 'platform.settings.view', description: 'View platform feature-flag settings' },
+    { name: 'platform.settings.manage', description: 'Manage platform feature-flag settings' },
   ];
 
   const permissions: Record<string, string> = {};
@@ -98,8 +109,8 @@ async function main() {
   console.log('\n🔗 Seeding role permissions...');
   const rolePermissionsMap: Record<string, string[]> = {
     'Super Admin': Object.keys(permissions),
-    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.delete', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage'],
-    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage'],
+    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.delete', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage', 'employer.verify', 'employer.suspend', 'platform.settings.view', 'platform.settings.manage'],
+    'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage', 'employer.verify', 'employer.suspend', 'platform.settings.view', 'platform.settings.manage'],
     'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'audit.read', 'media.upload', 'analytics.view', 'job.create', 'job.read', 'job.edit', 'job.review', 'job_application.view'],
     'Reporter': ['article.create', 'article.read', 'article.edit', 'media.upload', 'job.create', 'job.read', 'job.edit'],
     'Photographer': ['article.create', 'article.read', 'media.upload', 'media.manage'],
@@ -392,6 +403,47 @@ async function main() {
     console.log(`  ✓ Job category: ${cat.name}`);
   }
 
+  // ==================== JOB POSTING PLANS (Phase 2P) ====================
+  // Catalog/config row, not demo content — the single FREE plan third-party employers can post under
+  // once the employer platform is enabled. Paid plans are a future admin-managed addition.
+  console.log('\n💳 Seeding job posting plans...');
+  await prisma.jobPostingPlan.upsert({
+    where: { key: 'standard_free' },
+    update: { name: 'Standard (Free)', type: 'FREE', durationDays: 30, isFeatured: false, isActive: true, sortOrder: 0 },
+    create: { key: 'standard_free', name: 'Standard (Free)', type: 'FREE', durationDays: 30, isFeatured: false, isActive: true, sortOrder: 0 },
+  });
+  console.log('  ✓ Job posting plan: standard_free');
+
+  // ==================== PLATFORM SETTINGS (Phase 2P) ====================
+  // Safe-by-default feature flags gating the employer/third-party job-posting platform. Every switch
+  // that could expose the platform to the public (registration, self-service posting, paid posting,
+  // auto-publish) starts OFF; only read-only-ish/administrative defaults start ON. Pure config, upserted
+  // idempotently like every other catalog row in this file — never overwritten if an admin already
+  // changed it (update: {} leaves an existing row untouched on re-seed).
+  console.log('\n⚙️  Seeding platform settings...');
+  const platformSettingDefaults: Record<string, boolean> = {
+    employer_platform_enabled: false,
+    employer_registration_enabled: false,
+    company_profiles_enabled: true,
+    third_party_job_posting_enabled: false,
+    free_job_posting_enabled: true,
+    paid_job_posting_enabled: false,
+    featured_job_promotion_enabled: false,
+    employer_application_access_enabled: true,
+    employer_dashboard_enabled: true,
+    require_employer_verification: true,
+    require_admin_job_approval: true,
+    auto_publish: false,
+  };
+  for (const [key, value] of Object.entries(platformSettingDefaults)) {
+    await prisma.platformSetting.upsert({
+      where: { key },
+      update: {},
+      create: { key, value },
+    });
+    console.log(`  ✓ Platform setting: ${key} = ${value}`);
+  }
+
   // ==================== TAGS ====================
   console.log('\n🏷️  Seeding default tags...');
   const defaultTags = [
@@ -455,6 +507,9 @@ async function main() {
   console.log(`  ✓ Admin user created: ${adminEmail}`);
   console.log(`  ✓ Role: Super Admin`);
 
+  if (systemDataOnly) {
+    console.log('\n⏭️  Skipping demo/sample articles (SEED_SYSTEM_DATA_ONLY=true).');
+  } else {
   // ==================== SAMPLE ARTICLES ====================
   console.log('\n📰 Seeding sample articles...');
 
@@ -1265,6 +1320,7 @@ async function main() {
     },
   });
   console.log(`  ✓ Bangla-only article (no translation yet): "${lightningBn.title}"`);
+  } // end !systemDataOnly (demo articles)
 
   // ==================== SUMMARY ====================
   const counts = await Promise.all([
@@ -1278,6 +1334,8 @@ async function main() {
     prisma.article.count(),
     prisma.articleTag.count(),
     prisma.jobCategory.count(),
+    prisma.jobPostingPlan.count(),
+    prisma.platformSetting.count(),
   ]);
 
   console.log('\n✅ Seed completed successfully!');
@@ -1291,6 +1349,8 @@ async function main() {
   console.log(`   Articles: ${counts[7]} (12 original + 5 district + 1 breaking + 1 scheduled + 1 bn/en pair + 1 bn-only)`);
   console.log(`   Article-Tags: ${counts[8]}`);
   console.log(`   Job categories: ${counts[9]}`);
+  console.log(`   Job posting plans: ${counts[10]}`);
+  console.log(`   Platform settings: ${counts[11]}`);
   console.log('   Admin user seeded without printing credentials.');
 }
 

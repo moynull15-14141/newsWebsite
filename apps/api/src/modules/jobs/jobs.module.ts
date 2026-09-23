@@ -7,11 +7,12 @@ import { JobApplicationsAdminController } from './job-applications-admin.control
 import { JobsService } from './jobs.service';
 import { PublicJobsService } from './public-jobs.service';
 import { JobAuditLogService } from './services/job-audit-log.service';
+import { EmployerAuditLogService } from './services/employer-audit-log.service';
 import { JobScheduler } from './schedulers/job-scheduler.service';
 
 @Module({
   controllers: [JobsController, JobCategoriesController, EmployersController, PublicJobsController, JobApplicationsAdminController],
-  providers: [JobsService, PublicJobsService, JobAuditLogService, JobScheduler],
-  exports: [JobsService, PublicJobsService],
+  providers: [JobsService, PublicJobsService, JobAuditLogService, EmployerAuditLogService, JobScheduler],
+  exports: [JobsService, PublicJobsService, JobAuditLogService, EmployerAuditLogService],
 })
 export class JobsModule {}

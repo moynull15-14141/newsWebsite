@@ -1,11 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { JobsService } from './jobs.service';
 import { JobAuditLogService } from './services/job-audit-log.service';
+import { EmployerAuditLogService } from './services/employer-audit-log.service';
 
 describe('JobsService', () => {
   let service: JobsService;
   let prisma: any;
   let auditLog: any;
+  let employerAuditLog: any;
 
   const mockJob = {
     id: 'job-1',
@@ -33,9 +35,11 @@ describe('JobsService', () => {
       jobApplication: {
         findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn(), update: jest.fn(),
       },
+      employerMembership: { findMany: jest.fn() },
     };
     auditLog = { record: jest.fn().mockResolvedValue({}), listForJob: jest.fn() };
-    service = new JobsService(prisma, auditLog as unknown as JobAuditLogService);
+    employerAuditLog = { record: jest.fn().mockResolvedValue({}), listForEmployer: jest.fn() };
+    service = new JobsService(prisma, auditLog as unknown as JobAuditLogService, employerAuditLog as unknown as EmployerAuditLogService);
   });
 
   describe('create', () => {

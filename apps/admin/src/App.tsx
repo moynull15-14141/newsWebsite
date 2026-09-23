@@ -29,6 +29,7 @@ import JobEditorPage from './pages/JobEditorPage';
 import JobCategoriesPage from './pages/JobCategoriesPage';
 import EmployersPage from './pages/EmployersPage';
 import JobApplicationsPage from './pages/JobApplicationsPage';
+import PlatformSettingsPage from './pages/PlatformSettingsPage';
 
 function App() {
   return (
@@ -70,6 +71,7 @@ function App() {
         <Route path="jobs/employers" element={<RequirePermission permission="job.manage_employers"><EmployersPage /></RequirePermission>} />
         <Route path="jobs/applications" element={<RequirePermission permission="job_application.view"><JobApplicationsPage /></RequirePermission>} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/platform" element={<RequirePermission permission="platform.settings.view"><PlatformSettingsPage /></RequirePermission>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -135,7 +135,7 @@ export default function JobDetailPage() {
     datePosted: job.publishedAt || undefined,
     validThrough: job.deadline || undefined,
     employmentType: job.employmentType,
-    hiringOrganization: job.employer ? { '@type': 'Organization', name: job.employer.name, sameAs: (job.employer as any).website || undefined } : undefined,
+    hiringOrganization: job.employer ? { '@type': 'Organization', name: job.employer.name, sameAs: job.employer.website || undefined } : undefined,
     jobLocation: job.location ? { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: job.location.name, addressCountry: 'BD' } } : undefined,
     baseSalary: job.salaryMin ? { '@type': 'MonetaryAmount', currency: job.salaryCurrency || 'BDT', value: { '@type': 'QuantitativeValue', minValue: job.salaryMin, maxValue: job.salaryMax || job.salaryMin, unitText: 'MONTH' } } : undefined,
   };
@@ -212,25 +212,25 @@ export default function JobDetailPage() {
             {!!job.description && (
               <section className="mt-6">
                 <h2 className="text-lg font-bold text-neutral-900">{t('jobs.description')}</h2>
-                <TiptapRenderer content={job.description as any} />
+                <TiptapRenderer content={job.description as Record<string, unknown>} />
               </section>
             )}
             {!!job.responsibilities && (
               <section className="mt-6">
                 <h2 className="text-lg font-bold text-neutral-900">{t('jobs.responsibilities')}</h2>
-                <TiptapRenderer content={job.responsibilities as any} />
+                <TiptapRenderer content={job.responsibilities as Record<string, unknown>} />
               </section>
             )}
             {!!job.requirements && (
               <section className="mt-6">
                 <h2 className="text-lg font-bold text-neutral-900">{t('jobs.requirements')}</h2>
-                <TiptapRenderer content={job.requirements as any} />
+                <TiptapRenderer content={job.requirements as Record<string, unknown>} />
               </section>
             )}
             {!!job.qualifications && (
               <section className="mt-6">
                 <h2 className="text-lg font-bold text-neutral-900">{t('jobs.qualifications')}</h2>
-                <TiptapRenderer content={job.qualifications as any} />
+                <TiptapRenderer content={job.qualifications as Record<string, unknown>} />
               </section>
             )}
             {job.experience && (

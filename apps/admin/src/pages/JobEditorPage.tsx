@@ -32,9 +32,14 @@ function textToDoc(text: string): unknown {
   if (!lines.length) return undefined;
   return { type: 'doc', content: lines.map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })) };
 }
-function docToText(doc: any): string {
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.content)) return '';
-  return doc.content.map((node: any) => (node.content || []).map((n: any) => n.text || '').join('')).join('\n');
+interface TiptapTextNode { text?: string }
+interface TiptapDocNode { content?: TiptapTextNode[] }
+
+function docToText(doc: unknown): string {
+  if (!doc || typeof doc !== 'object' || !Array.isArray((doc as { content?: unknown }).content)) return '';
+  return ((doc as { content: TiptapDocNode[] }).content)
+    .map((node) => (node.content || []).map((n) => n.text || '').join(''))
+    .join('\n');
 }
 
 export default function JobEditorPage() {

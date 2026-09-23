@@ -6,6 +6,7 @@ import { QueryJobsDto } from './dto/query-jobs.dto';
 import { CreateJobCategoryDto, UpdateJobCategoryDto } from './dto/job-category.dto';
 import { CreateEmployerDto, UpdateEmployerDto } from './dto/employer.dto';
 import { JobAuditLogService } from './services/job-audit-log.service';
+import { EmployerAuditLogService } from './services/employer-audit-log.service';
 
 const JOB_LIST_SELECT = {
   id: true, title: true, slug: true, summary: true, status: true, featured: true,
@@ -24,6 +25,7 @@ export class JobsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLog: JobAuditLogService,
+    private readonly employerAuditLog: EmployerAuditLogService,
   ) {}
 
   private slugify(text: string): string {
@@ -434,6 +436,61 @@ export class JobsService {
       if (!media) throw new BadRequestException('Logo media not found');
     }
     return this.prisma.employer.update({ where: { id }, data: dto });
+  }
+
+  // ==================== EMPLOYER VERIFICATION / SUSPENSION (Phase 2P, admin side) ====================
+
+  /** Valid from PENDING (first review) or REJECTED (re-review after the employer addressed feedback) —
+   * never from VERIFIED, so an already-verified company can't be silently re-decided through this
+   * endpoint (an admin would have to suspend/reactivate instead, a deliberately separate action). */
+  async verifyEmployer(id: string, decision: 'VERIFIED' | 'REJECTED', note: string | undefined, userId: string) {
+    const existing = await this.prisma.employer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Employer not found');
+    if (existing.verificationStatus === 'VERIFIED') {
+      throw new BadRequestException('This employer is already verified');
+    }
+    const updated = await this.prisma.employer.update({
+      where: { id },
+      data: { verificationStatus: decision, verifiedAt: new Date(), verifiedById: userId, verificationNote: note ?? null },
+    });
+    await this.employerAuditLog.record({
+      employerId: id, actorId: userId, action: decision === 'VERIFIED' ? 'employer.verified' : 'employer.verification_rejected', note,
+    });
+    return updated;
+  }
+
+  async suspendEmployer(id: string, userId: string) {
+    const existing = await this.prisma.employer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Employer not found');
+    if (existing.status === 'SUSPENDED') throw new BadRequestException('Employer is already suspended');
+    const updated = await this.prisma.employer.update({ where: { id }, data: { status: 'SUSPENDED' } });
+    await this.employerAuditLog.record({ employerId: id, actorId: userId, action: 'employer.suspended' });
+    return updated;
+  }
+
+  async reactivateEmployer(id: string, userId: string) {
+    const existing = await this.prisma.employer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Employer not found');
+    if (existing.status === 'ACTIVE') throw new BadRequestException('Employer is already active');
+    const updated = await this.prisma.employer.update({ where: { id }, data: { status: 'ACTIVE' } });
+    await this.employerAuditLog.record({ employerId: id, actorId: userId, action: 'employer.reactivated' });
+    return updated;
+  }
+
+  async getEmployerAuditLog(id: string, page = 1, limit = 50) {
+    const existing = await this.prisma.employer.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Employer not found');
+    return this.employerAuditLog.listForEmployer(id, page, limit);
+  }
+
+  async getEmployerMembers(id: string) {
+    const existing = await this.prisma.employer.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Employer not found');
+    return this.prisma.employerMembership.findMany({
+      where: { employerId: id, status: { not: 'REMOVED' } },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   // ==================== APPLICATION MANAGEMENT (admin/staff side) ====================

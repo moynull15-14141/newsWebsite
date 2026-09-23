@@ -27,6 +27,8 @@ import { SeoModule } from './modules/seo/seo.module';
 import { LanguagesModule } from './modules/languages/languages.module';
 import { BreakingNewsModule } from './modules/breaking-news/breaking-news.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { PlatformSettingsModule } from './modules/platform-settings/platform-settings.module';
+import { EmployerPortalModule } from './modules/employer-portal/employer-portal.module';
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { JobsModule } from './modules/jobs/jobs.module';
     LanguagesModule,
     BreakingNewsModule,
     JobsModule,
+    PlatformSettingsModule,
+    EmployerPortalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

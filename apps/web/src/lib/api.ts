@@ -24,6 +24,18 @@ export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
 }
 
+export function isForbiddenError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
+}
+
+/** apps/web's `ApiError` only ever carries `.status` (no parsed server message — see the class comment
+ * above), so unlike admin's `getApiErrorMessage` this can't surface the backend's real text. Employer
+ * portal pages that need the backend's explanation (e.g. why registration is disabled) should fetch that
+ * reason from a dedicated read endpoint instead of relying on the error message. */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const auth = useReaderAuthStore.getState();
   const headers = { 'Content-Type': 'application/json', ...(options?.headers || {}), ...(auth.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) };
