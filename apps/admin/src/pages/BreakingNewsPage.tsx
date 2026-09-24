@@ -123,7 +123,7 @@ function TickerPreview({ form }: { form: FormState }) {
           className="shrink-0 rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wider"
           style={{ backgroundColor: form.badgeBackgroundColor, color: form.badgeTextColor }}
         >
-          Breaking
+          Breaking News
         </span>
         <span className="truncate text-sm font-medium" style={{ color: form.textColor }}>
           {form.headline || 'Your headline will appear here'}

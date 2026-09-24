@@ -29,12 +29,20 @@ export async function loadLocationDescendants(prisma: LocationReader, rootIds: s
  * Same traversal, but keeps each root's own subtree separate — for callers (the homepage LOCATION
  * source) that need "this specific section's location and everything under it" rather than one
  * combined list. A location has exactly one parent, so a descendant belongs to exactly one root's
- * family (assuming the given roots aren't themselves ancestor/descendant of each other).
+ * family — including when one requested root is itself nested inside another requested root's subtree
+ * (e.g. a country-wide section and a division-level section configured at the same time): each root
+ * keeps its own family regardless of ancestry between the roots. Without the `rootIdSet` guard below,
+ * the nested root would get relabeled as the outer root's child on the very same BFS pass its own real
+ * children are fetched in, silently stealing its whole subtree into the outer root's family and leaving
+ * the nested root's own section with nothing but itself (seen in production: a homepage section scoped
+ * to a division came back with zero articles because every district under it had been reassigned to a
+ * sibling country-wide section that happened to be configured at the same time).
  */
 export async function loadLocationFamilies(prisma: LocationReader, rootIds: string[]): Promise<Map<string, string[]>> {
   const families = new Map<string, string[]>(rootIds.map((id) => [id, [id]]));
   if (!rootIds.length) return families;
 
+  const rootIdSet = new Set(rootIds);
   // Which root a location id currently belongs to, so a grandchild is attributed to the right family.
   const owner = new Map<string, string>(rootIds.map((id) => [id, id]));
   let frontier = [...rootIds];
@@ -46,6 +54,9 @@ export async function loadLocationFamilies(prisma: LocationReader, rootIds: stri
     });
     const nextFrontier: string[] = [];
     for (const child of children) {
+      // Already one of the requested roots — keeps owning its own subtree no matter which other root's
+      // children this same query batch also happened to fetch it as.
+      if (rootIdSet.has(child.id)) continue;
       const rootId = child.parentId ? owner.get(child.parentId) : undefined;
       if (!rootId) continue;
       families.get(rootId)?.push(child.id);

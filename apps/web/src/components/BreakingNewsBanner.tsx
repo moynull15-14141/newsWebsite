@@ -87,7 +87,7 @@ export default function BreakingNewsBanner() {
         className="shrink-0 rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wider"
         style={{ backgroundColor: item.badgeBackgroundColor, color: item.badgeTextColor }}
       >
-        Breaking
+        Breaking News
       </span>
       <span className="text-sm font-medium" style={{ color: item.textColor }}>{renderHeadline(item)}</span>
     </div>
@@ -110,7 +110,7 @@ export default function BreakingNewsBanner() {
                     className="shrink-0 rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wider"
                     style={{ backgroundColor: item.badgeBackgroundColor, color: item.badgeTextColor }}
                   >
-                    Breaking
+                    Breaking News
                   </span>
                   <span className="min-w-0 break-words text-sm font-medium" style={{ color: item.textColor }}>{renderHeadline(item)}</span>
                 </li>

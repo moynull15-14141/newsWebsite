@@ -258,16 +258,17 @@
  * infinite CSS animation with no per-item completion event to depend on can't get stuck that way.
  *
  * Technique: all active items render twice back-to-back in one flex row (`.bn-ticker-track-inner`),
- * and the row animates `transform: translateX(-50% → 0%)` — exactly one copy's width, always, however
+ * and the row animates `transform: translateX(0% → -50%)` — exactly one copy's width, always, however
  * many items there are or however wide the container is. That makes the two copies seamlessly
- * indistinguishable at the loop boundary, and because the row moves in the positive X direction it
- * reads as LEFT → RIGHT: content that was off-screen past the left edge continuously scrolls into view
- * and exits past the right edge — the "enters from left, moves right" requirement, sustained
- * continuously rather than as a single one-shot pass.
+ * indistinguishable at the loop boundary, and because the row moves in the negative X direction it
+ * reads as RIGHT → LEFT — the standard news-ticker convention: a headline's beginning enters at the
+ * right edge first and its end is the last part to cross the left edge, so it reads start-to-finish as
+ * it passes, sustained continuously rather than as a single one-shot pass. (The previous direction had
+ * this backwards — content entered left-to-right, which shows a sentence's end before its beginning.)
  */
 @keyframes bn-track-scroll {
-  from { transform: translateX(-50%); }
-  to { transform: translateX(0%); }
+  from { transform: translateX(0%); }
+  to { transform: translateX(-50%); }
 }
 
 .bn-ticker-track-inner {
