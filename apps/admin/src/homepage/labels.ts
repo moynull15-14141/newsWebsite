@@ -24,6 +24,28 @@ export const CREATABLE_SECTION_TYPES = ['LATEST', 'BANGLADESH', 'WORLD', 'POLITI
 
 export const sectionTypeLabel = (type: string) => SECTION_TYPE_LABELS[type] ?? type;
 
+/**
+ * Picking a preset "Section type" (e.g. "Bangladesh") only sets the section's title — it does NOT, on
+ * its own, scope the section's content. Without this map, an editor who picks the "Bangladesh" type and
+ * leaves "Where the stories come from" untouched gets a section titled "Bangladesh" that actually shows
+ * unfiltered Latest stories (the SourceType default), with nothing in the UI flagging the mismatch. This
+ * is exactly the bug reported: a "Bangladesh" section that "isn't there" — it existed, titled correctly,
+ * but wasn't pulling Bangladesh-specific stories.
+ *
+ * `BANGLADESH` maps to the Location "Bangladesh" (the country), not the like-named Category — same
+ * reasoning as the public nav's FIXED_NAV (see apps/web/src/components/Header.tsx): the location
+ * aggregates every district tagged under it, which the identically-named category does not.
+ */
+export const SECTION_TYPE_DEFAULT_SOURCE: Partial<Record<string, { sourceType: 'CATEGORY' | 'LOCATION'; slug: string }>> = {
+  BANGLADESH: { sourceType: 'LOCATION', slug: 'bangladesh' },
+  WORLD: { sourceType: 'CATEGORY', slug: 'world' },
+  POLITICS: { sourceType: 'CATEGORY', slug: 'politics' },
+  BUSINESS: { sourceType: 'CATEGORY', slug: 'business' },
+  SPORTS: { sourceType: 'CATEGORY', slug: 'sports' },
+  TECHNOLOGY: { sourceType: 'CATEGORY', slug: 'technology' },
+  ENTERTAINMENT: { sourceType: 'CATEGORY', slug: 'entertainment' },
+};
+
 export interface LayoutMeta {
   label: string;
   hint: string;

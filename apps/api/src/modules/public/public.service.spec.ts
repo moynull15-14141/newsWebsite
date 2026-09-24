@@ -120,15 +120,56 @@ describe('PublicService', () => {
       );
     });
 
-    it('applies database-level pagination (skip/take), never fetching everything', async () => {
+    it('applies database-level pagination (skip/take) for a plain listing, never fetching everything', async () => {
+      prisma.article.findMany.mockResolvedValue([]);
+      prisma.article.count.mockResolvedValue(0);
+
+      await service.getArticles({ page: 3, limit: 10 });
+
+      expect(prisma.article.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
+    });
+
+    // A `search` fetches from the top and re-sorts in memory (see sortMatchesByLanguage below), since
+    // "current language first" can't be expressed as a single SQL ORDER BY here — so it can't use a
+    // plain database skip either, or a same-language match on page 2 could be dropped by a skip that
+    // was computed before the reordering happened.
+    it('fetches from the top (skip: undefined, take: skip+limit) for a search, not a plain skip/take window', async () => {
       prisma.article.findMany.mockResolvedValue([]);
       prisma.article.count.mockResolvedValue(0);
 
       await service.getArticles({ page: 3, limit: 10, search: 'x' });
 
       expect(prisma.article.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ skip: 20, take: 10 }),
+        expect.objectContaining({ skip: undefined, take: 30 }),
       );
+    });
+
+    it('search results in the reader\'s current language are surfaced before matches in any other language', async () => {
+      const bnMatch = { ...mockArticle, id: 'bn-1', language: { id: 'lang-bn', code: 'bn' } };
+      const enMatch = { ...mockArticle, id: 'en-1', language: { id: 'lang-en', code: 'en' } };
+      // DB order (e.g. newest-first) puts the English match ahead of the Bengali one; the reader is
+      // browsing in Bengali (DEFAULT_LANGUAGE), so the Bengali match should still come first in the result.
+      prisma.article.findMany.mockResolvedValue([enMatch, bnMatch]);
+      prisma.article.count.mockResolvedValue(2);
+
+      const result = await service.getArticles({ page: 1, limit: 20, search: 'x' });
+
+      expect(result.data.map((a: any) => a.id)).toEqual(['bn-1', 'en-1']);
+    });
+
+    it('a search is NOT scoped to the resolved language — a match in another language is still returned', async () => {
+      const enOnlyMatch = { ...mockArticle, id: 'en-1', language: { id: 'lang-en', code: 'en' } };
+      prisma.article.findMany.mockResolvedValue([enOnlyMatch]);
+      prisma.article.count.mockResolvedValue(1);
+
+      await service.getArticles({ page: 1, limit: 20, search: 'x' });
+
+      const call = prisma.article.findMany.mock.calls[0][0];
+      // articleLanguageWhere(...) would show up as a languageId/OR clause inside `where.AND`; a search
+      // must omit it entirely rather than silently filtering out every other-language match.
+      expect(call.where.AND).toBeUndefined();
     });
 
     it('resolves and filters by the requested language', async () => {

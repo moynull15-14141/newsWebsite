@@ -126,6 +126,7 @@ model Language {
   categoryTranslations CategoryTranslation[]
   tagTranslations      TagTranslation[]
   locationTranslations LocationTranslation[]
+  adCampaigns          AdCampaign[]
 
   @@map("languages")
 }
@@ -329,6 +330,12 @@ model User {
   createdJobPostingOrders JobPostingOrder[]
   employerAuditLogEntries EmployerAuditLog[]
 
+  // Advertisement platform (Phase 2Q)
+  createdAdvertisers    Advertiser[]
+  createdAdCampaigns    AdCampaign[] @relation("AdCampaignCreatedBy")
+  approvedAdCampaigns   AdCampaign[] @relation("AdCampaignApprovedBy")
+  adAuditLogEntries     AdAuditLog[]
+
   @@map("users")
 }
 
@@ -421,6 +428,7 @@ model Location {
   translations      LocationTranslation[]
   jobs              Job[]
   employers         Employer[]
+  adCampaigns       AdCampaign[]
 
   @@unique([type, parentId, slug])
   @@index([slug])
@@ -447,6 +455,7 @@ model Category {
   readerPreferences ReaderPreferenceCategory[]
   homepageSections  HomepageSection[]
   translations      CategoryTranslation[]
+  adCampaigns       AdCampaign[]
 
   @@index([slug])
   @@index([status])
@@ -675,6 +684,28 @@ model ArticleTag {
   @@map("article_tags")
 }
 
+/// Phase 2R. UPLOADING = a presigned-upload Media row created before the browser has actually pushed
+/// bytes to storage (see MediaService.createPresignedUpload) — never publicly served or picker-selectable
+/// until verified. READY = the direct-upload path's terminal state immediately, or what UPLOADING becomes
+/// once /media/:id/complete verifies the object really exists in storage. FAILED = complete() couldn't
+/// find the object (abandoned/broken client upload). DELETED = soft-delete marker for the orphan-cleanup
+/// foundation (see MediaService.markOrphanCandidate) — existing hard-delete-when-unreferenced behavior in
+/// MediaService.remove() is unchanged; this status is for a *future* cleanup job, not created by it yet.
+enum MediaStatus {
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+}
+
+/// Which StorageProvider actually holds the object — informational (which backend to expect) rather than
+/// load-bearing: the provider that serves a request is always today's STORAGE_PROVIDER/MEDIA_STORAGE_PROVIDER
+/// config, so this can't silently point requests at a provider no longer configured.
+enum MediaProvider {
+  LOCAL
+  R2
+}
+
 model Media {
   id               String   @id @default(uuid())
   filename         String
@@ -689,6 +720,20 @@ model Media {
   caption          String?
   credit           String?
   uploadedById     String   @map("uploaded_by_id")
+
+  /// Existing rows (pre-Phase 2R, all direct-uploaded) default to READY/LOCAL — both are accurate for
+  /// every row that already exists, since the direct-upload path never had a pending state and this
+  /// project's storage has only ever run as `local` so far.
+  status           MediaStatus   @default(READY)
+  provider         MediaProvider @default(LOCAL)
+  bucket           String?
+  /// Set only on a presigned-upload row while it's UPLOADING — lets the orphan-detection foundation flag
+  /// a row whose browser upload never arrived (see MediaService.findOrphanCandidates).
+  uploadExpiresAt  DateTime?     @map("upload_expires_at")
+  /// Soft-delete marker for the orphan-cleanup foundation (Step 24) — set by markOrphanCandidate(), never
+  /// by remove() today. A future cleanup job decides what to do with DELETED+deletedAt-set rows.
+  deletedAt        DateTime?     @map("deleted_at")
+
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -696,9 +741,16 @@ model Media {
   featuredArticles Article[]             @relation("ArticleFeaturedImage")
   ads              Ad[]
   collectionCovers EditorialCollection[]
+  adCreativeDesktopFor AdCreative[]      @relation("AdCreativeDesktopMedia")
+  adCreativeMobileFor  AdCreative[]      @relation("AdCreativeMobileMedia")
   readerAvatars    ReaderProfile[]       @relation("ReaderAvatar")
   employerLogos    Employer[]            @relation("EmployerLogo")
   employerCovers   Employer[]            @relation("EmployerCover")
+
+  @@index([uploadedById])
+  @@index([status])
+  @@index([mimeType])
+  @@index([createdAt])
 }
 
 model ReaderProfile {
@@ -1208,6 +1260,312 @@ model AdClick {
   @@index([createdAt])
   @@index([adId, createdAt])
   @@map("ad_clicks")
+}
+
+// ==================== ADVERTISEMENT PLATFORM (Phase 2Q) ====================
+// Deliberately separate from the flat Ad/AdImpression/AdClick models above (Phase 2K-era, zero rows in
+// any real environment): those models have no Advertiser/Campaign/Creative separation, so they can't
+// express "one advertiser runs one campaign across several placements with several rotating creatives
+// and a real approval workflow" — the actual business requirement. Rather than shoehorning that onto
+// the flat model, this is the real inventory system; the old models are left in place (unused by the
+// new admin/public code) rather than dropped, since dropping a table is a destructive migration and
+// they hold no data worth migrating.
+
+/// DRAFT -> PENDING_REVIEW -> APPROVED -> (SCHEDULED ->) ACTIVE -> PAUSED/EXPIRED -> ARCHIVED. Mirrors
+/// JobStatus's shape deliberately (see that enum) — same reasoning: a small closed set of admin-driven
+/// states plus two states a scheduler can reach on its own (SCHEDULED->ACTIVE, ACTIVE->EXPIRED).
+/// PENDING_REVIEW/APPROVED gate is mandatory: nothing reaches ACTIVE without passing through APPROVED
+/// first (enforced in AdCampaignsService, not just by convention), so "approval required before public
+/// display" cannot be bypassed by e.g. jumping straight from DRAFT to SCHEDULED.
+enum AdCampaignStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  EXPIRED
+  ARCHIVED
+}
+
+/// IMAGE/RESPONSIVE_IMAGE render through the existing Media abstraction (desktop/mobile asset refs);
+/// NATIVE_SPONSORED renders as an in-feed card with its own headline/body and a mandatory "Sponsored"
+/// label. VIDEO/HTML_RICH_MEDIA are declared now so PlacementRegistry/CreativeService branches are
+/// already exhaustive-checked against them, but no renderer is implemented for either in this phase.
+enum AdCreativeType {
+  IMAGE
+  RESPONSIVE_IMAGE
+  NATIVE_SPONSORED
+  VIDEO
+  HTML_RICH_MEDIA
+}
+
+/// The full controlled placement registry (Phase 2Q spec). One AdPlacement row per value, seeded once
+/// (see prisma/seed.ts) — never created ad hoc by an admin, so "where can an ad ever appear" stays a
+/// reviewable, finite list rather than a free-text slot string (the old AdSlotName's own weakness, kept
+/// only for the legacy Ad model above).
+enum AdPlacementKey {
+  BREAKING_NEWS_BELOW
+  TOP_BILLBOARD
+  MOBILE_STICKY
+  HOME_HERO
+  HOME_FEED
+  HOME_MID_FEED
+  HOME_SIDEBAR
+  HOME_BEFORE_FOOTER
+  ARTICLE_TOP
+  ARTICLE_AFTER_INTRO
+  ARTICLE_IN_CONTENT
+  ARTICLE_MID
+  ARTICLE_END
+  ARTICLE_RELATED
+  ARTICLE_SIDEBAR
+  CATEGORY_TOP
+  CATEGORY_FEED
+  CATEGORY_MID
+  CATEGORY_SIDEBAR
+  SEARCH_INLINE
+  PAGE_TOP
+  PAGE_CONTENT
+  PAGE_SIDEBAR
+  PAGE_BOTTOM
+}
+
+enum AdPlacementGroup {
+  GLOBAL
+  HOMEPAGE
+  ARTICLE
+  CATEGORY
+  SEARCH
+  GENERIC
+}
+
+enum AdDeviceTarget {
+  ALL
+  DESKTOP
+  TABLET
+  MOBILE
+}
+
+/// Coarse page-type targeting — same vocabulary AdPlacementGroup uses for placements, so "this campaign
+/// runs on article pages" and "this placement lives on article pages" are the same concept on both
+/// sides of the eligibility check (see AdCampaignsService.getEligibleForPlacement).
+enum AdPageTarget {
+  ALL
+  HOMEPAGE
+  ARTICLE
+  CATEGORY
+  SEARCH
+  JOBS
+  VIDEO
+  SPECIAL
+}
+
+enum AdEventType {
+  IMPRESSION
+  CLICK
+}
+
+model Advertiser {
+  id           String    @id @default(uuid())
+  name         String
+  contactName  String?   @map("contact_name")
+  contactEmail String?   @map("contact_email")
+  contactPhone String?   @map("contact_phone")
+  notes        String?
+  active       Boolean   @default(true)
+  createdById  String    @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  createdBy User        @relation(fields: [createdById], references: [id])
+  campaigns AdCampaign[]
+
+  @@index([active])
+  @@map("advertisers")
+}
+
+/// The controlled placement registry itself — one row per AdPlacementKey, seeded once. `enabled` is the
+/// site-wide kill switch for a placement (spec: "Admin must be able to enable/disable placement"),
+/// independent of any campaign assigned to it — disabling HOME_HERO here hides every campaign from it
+/// without touching campaign data, and touches nothing else on the homepage (editorial content is never
+/// stored on this table).
+model AdPlacement {
+  id                 String           @id @default(uuid())
+  key                AdPlacementKey   @unique
+  label              String
+  group              AdPlacementGroup
+  description        String?
+  recommendedWidth   Int?             @map("recommended_width")
+  recommendedHeight  Int?             @map("recommended_height")
+  enabled            Boolean          @default(true)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  campaignPlacements AdCampaignPlacement[]
+  events             AdEvent[]
+
+  @@map("ad_placements")
+}
+
+model AdCampaign {
+  id           String           @id @default(uuid())
+  name         String
+  advertiserId String           @map("advertiser_id")
+  status       AdCampaignStatus @default(DRAFT)
+
+  startAt  DateTime? @map("start_at")
+  endAt    DateTime? @map("end_at")
+  priority Int       @default(0)
+
+  targetUrl String? @map("target_url")
+
+  // Targeting — every field nullable/ALL-default means "no restriction on this dimension". Enforced
+  // server-side in AdCampaignsService.getEligibleForPlacement, never left to the client to honor.
+  languageId     String?        @map("language_id")
+  deviceTarget   AdDeviceTarget @default(ALL) @map("device_target")
+  pageTarget     AdPageTarget   @default(ALL) @map("page_target")
+  categoryId     String?        @map("category_id")
+  locationId     String?        @map("location_id")
+
+  /// Foundation only (spec: "frequency capping foundation") — max times a single session may be served
+  /// an impression for this campaign per rolling 24h window. Null = uncapped. Enforced in
+  /// AdEventsService.recordImpression the same way the legacy Ad model already deduplicated
+  /// same-session impressions, just generalized to a configurable window/count instead of a fixed 30min.
+  frequencyCapPerDay Int? @map("frequency_cap_per_day")
+
+  notes String?
+
+  createdById  String    @map("created_by_id")
+  approvedById String?   @map("approved_by_id")
+  approvedAt   DateTime? @map("approved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  advertiser Advertiser            @relation(fields: [advertiserId], references: [id])
+  language   Language?             @relation(fields: [languageId], references: [id])
+  category   Category?             @relation(fields: [categoryId], references: [id])
+  location   Location?             @relation(fields: [locationId], references: [id])
+  createdBy  User                  @relation("AdCampaignCreatedBy", fields: [createdById], references: [id])
+  approvedBy User?                 @relation("AdCampaignApprovedBy", fields: [approvedById], references: [id])
+  creatives  AdCreative[]
+  placements AdCampaignPlacement[]
+  events     AdEvent[]
+  auditLogs  AdAuditLog[]
+
+  @@index([status])
+  @@index([advertiserId])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([status, startAt, endAt])
+  @@map("ad_campaigns")
+}
+
+/// A campaign can have multiple creatives (spec) — e.g. a desktop banner and a square mobile banner for
+/// the same offer, or several rotating variants for the same placement. `rotationWeight` feeds a
+/// weighted-random pick among a campaign's active creatives at serve time (see AdCampaignsService);
+/// equal weights (the default) means even rotation.
+model AdCreative {
+  id              String         @id @default(uuid())
+  campaignId      String         @map("campaign_id")
+  type            AdCreativeType
+
+  desktopMediaId  String?        @map("desktop_media_id")
+  mobileMediaId   String?        @map("mobile_media_id")
+  targetUrl       String?        @map("target_url")
+  ctaText         String?        @map("cta_text")
+  altText         String?        @map("alt_text")
+
+  /// NATIVE_SPONSORED-only fields. Kept on the same row rather than a separate table: a creative is
+  /// always exactly one type for its whole lifetime (no creative switches from IMAGE to NATIVE_SPONSORED),
+  /// so a polymorphic side-table would only add a join for no real flexibility gained.
+  nativeHeadline     String? @map("native_headline")
+  nativeBody         String? @map("native_body")
+  nativeSponsorLabel String  @default("Sponsored") @map("native_sponsor_label")
+
+  active         Boolean  @default(true)
+  rotationWeight Int      @default(1) @map("rotation_weight")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  campaign     AdCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  desktopMedia Media?     @relation("AdCreativeDesktopMedia", fields: [desktopMediaId], references: [id])
+  mobileMedia  Media?     @relation("AdCreativeMobileMedia", fields: [mobileMediaId], references: [id])
+  events       AdEvent[]
+
+  @@index([campaignId])
+  @@index([active])
+  @@map("ad_creatives")
+}
+
+/// Campaign-placement assignment (spec item 5) — decoupled from AdCampaign itself so a campaign can run
+/// in several placements at once, each independently enabled/disabled/prioritized without touching the
+/// campaign row or its other placements. `priority` overrides AdCampaign.priority for THIS placement
+/// only when set; null falls back to the campaign's own priority.
+model AdCampaignPlacement {
+  id          String   @id @default(uuid())
+  campaignId  String   @map("campaign_id")
+  placementId String   @map("placement_id")
+  priority    Int?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  campaign  AdCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  placement AdPlacement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, placementId])
+  @@index([placementId, enabled])
+  @@map("ad_campaign_placements")
+}
+
+/// Impression/click event foundation (spec item 11) — one table for both event types (`type`) rather
+/// than the legacy model's separate AdImpression/AdClick tables, since every other field is identical
+/// and a combined CTR query no longer needs a UNION. `context` is a short free-text page identifier
+/// (e.g. an article slug or category slug) for future per-page analytics; deliberately not a FK to
+/// Article/Category, since an ad placement can appear on pages that have no such row (search, jobs).
+model AdEvent {
+  id          String      @id @default(uuid())
+  type        AdEventType
+  campaignId  String      @map("campaign_id")
+  creativeId  String      @map("creative_id")
+  placementId String      @map("placement_id")
+  sessionId   String?     @map("session_id")
+  context     String?
+  device      String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  campaign  AdCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creative  AdCreative  @relation(fields: [creativeId], references: [id], onDelete: Cascade)
+  placement AdPlacement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, createdAt])
+  @@index([placementId, createdAt])
+  @@index([type, createdAt])
+  @@index([campaignId, sessionId, type, createdAt])
+  @@map("ad_events")
+}
+
+/// Same append-only "who did what, when" pattern as EmployerAuditLog/JobAuditLog (see those models) —
+/// free-text `action`/fromStatus/toStatus rather than a closed enum, so a new workflow action never
+/// needs a migration. A null campaignId is reserved for placement-registry-level actions (e.g. an admin
+/// disabling a whole placement), which are not scoped to any one campaign.
+model AdAuditLog {
+  id         String   @id @default(uuid())
+  campaignId String?  @map("campaign_id")
+  actorId    String?  @map("actor_id")
+  action     String
+  fromStatus String?  @map("from_status")
+  toStatus   String?  @map("to_status")
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  campaign AdCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  actor    User?       @relation(fields: [actorId], references: [id])
+
+  @@index([campaignId, createdAt])
+  @@index([action, createdAt])
+  @@map("ad_audit_logs")
 }
 
 model AnalyticsEvent {

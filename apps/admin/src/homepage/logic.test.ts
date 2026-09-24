@@ -18,6 +18,7 @@ import {
   placementIds,
   publishState,
   reorderSectionIds,
+  resolveDefaultSourceForType,
   summarizeDraft,
   unselectableReason,
 } from './logic';
@@ -249,5 +250,45 @@ describe('content sources', () => {
 
   it('keeps the Hero fixed at one story regardless of source', () => {
     expect(maxItemsBounds(section('hero', 'HERO', ['h1']))).toEqual({ min: 1, max: 1, fixed: true });
+  });
+});
+
+// Regression: picking the "Bangladesh" section type used to leave sourceType at its MANUAL/LATEST
+// default, producing a section titled "Bangladesh" that actually showed unfiltered Latest stories — the
+// exact bug reported ("added a Bangladesh section but it's not there"). resolveDefaultSourceForType is
+// what SectionDialog's type picker now calls to scope the section correctly from the start.
+describe('resolveDefaultSourceForType', () => {
+  const categories = [{ id: 'cat-world', name: 'World', slug: 'world' }, { id: 'cat-biz', name: 'Business', slug: 'business' }];
+  const locations = [
+    { id: 'loc-bd', name: 'Bangladesh', slug: 'bangladesh', type: 'COUNTRY' },
+    { id: 'loc-dhaka', name: 'Dhaka', slug: 'dhaka', type: 'DIVISION' },
+  ];
+
+  it('maps "Bangladesh" to the Location, not the like-named Category', () => {
+    expect(resolveDefaultSourceForType('BANGLADESH', categories, locations)).toEqual({
+      sourceType: 'LOCATION', categoryId: null, locationId: 'loc-bd',
+    });
+  });
+
+  it('maps other presets (e.g. "World") to their matching Category', () => {
+    expect(resolveDefaultSourceForType('WORLD', categories, locations)).toEqual({
+      sourceType: 'CATEGORY', categoryId: 'cat-world', locationId: null,
+    });
+  });
+
+  it('returns null for types with no sensible auto-link (LATEST, CUSTOM, HERO)', () => {
+    expect(resolveDefaultSourceForType('LATEST', categories, locations)).toBeNull();
+    expect(resolveDefaultSourceForType('CUSTOM', categories, locations)).toBeNull();
+    expect(resolveDefaultSourceForType('HERO', categories, locations)).toBeNull();
+  });
+
+  it('returns null (never a wrong guess) when the matching category/location has not loaded yet', () => {
+    expect(resolveDefaultSourceForType('BANGLADESH', categories, undefined)).toBeNull();
+    expect(resolveDefaultSourceForType('WORLD', undefined, locations)).toBeNull();
+  });
+
+  it('only ever matches a COUNTRY-type location for a LOCATION preset, never a division/district sharing the slug', () => {
+    const trickyLocations = [{ id: 'loc-bd-district', name: 'Bangladesh', slug: 'bangladesh', type: 'DISTRICT' }];
+    expect(resolveDefaultSourceForType('BANGLADESH', categories, trickyLocations)).toBeNull();
   });
 });

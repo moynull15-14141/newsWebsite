@@ -23,4 +23,12 @@ export class QueryMediaDto {
   @IsOptional()
   @IsString()
   mimeType?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  uploadedById?: string;
 }

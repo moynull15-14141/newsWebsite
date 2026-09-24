@@ -12,6 +12,17 @@ import { ARTICLE_SELECT } from './public-article-select';
 import { articleLanguageWhere } from '../../common/i18n/article-language';
 import { loadLocationDescendants } from '../../common/location/location-descendants';
 
+/** Stable partition: current-language matches first, everyone else after, each group keeping its
+ *  existing relative order (already `sort`/`order`-sorted by the caller's Prisma query). */
+function sortMatchesByLanguage<T extends { language?: { id: string } | null }>(articles: T[], currentLanguageId: string): T[] {
+  const own: T[] = [];
+  const other: T[] = [];
+  for (const article of articles) {
+    (article.language?.id === currentLanguageId ? own : other).push(article);
+  }
+  return [...own, ...other];
+}
+
 const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_SELECT,
   content: true,
@@ -36,17 +47,27 @@ export class PublicService {
    * Every public article listing goes through here, and every one resolves `?lang=` the same way:
    * an unknown/omitted/disabled code falls back to the platform default rather than 404ing or
    * silently mixing languages. Legacy rows with no `languageId` count as the default language.
+   *
+   * The one deliberate exception is a free-text `search`: it is NOT language-scoped. A reader typing
+   * a title/word into search is trying to find out whether a story exists at all — filtering out a
+   * match just because that specific translation doesn't exist yet in their current UI language would
+   * read as "this doesn't exist" (costing that reader) rather than "here it is, in Bengali/English".
+   * Matches in the reader's current language are still surfaced first (`sortMatchesByLanguage` below);
+   * every other listing (category/tag/homepage/etc, which all reuse this same method without `search`)
+   * stays strictly scoped to the resolved language exactly as before.
    */
   async getArticles(query: PublicArticleQueryDto, extraWhere: any = {}): Promise<{ data: any[]; meta: { page: number; limit: number; total: number; totalPages: number } }> {
     const { page = 1, limit = 20, search, sort = 'publishedAt', order = 'desc', lang } = query;
     const skip = (page - 1) * limit;
     const language = await this.languagesService.resolveRequested(lang);
 
+    const extraAnd = extraWhere.AND ?? [];
     const where: any = {
       status: 'PUBLISHED',
       ...extraWhere,
-      AND: [articleLanguageWhere(language), ...(extraWhere.AND ?? [])],
+      AND: search ? extraAnd : [articleLanguageWhere(language), ...extraAnd],
     };
+    if (!where.AND.length) delete where.AND;
 
     if (search) {
       where.OR = [
@@ -60,16 +81,20 @@ export class PublicService {
     const [articles, total] = await Promise.all([
       this.prisma.article.findMany({
         where,
-        skip,
-        take: limit,
+        // Cross-language search can't push "current language first" into a single SQL ORDER BY without
+        // a raw query, so it over-fetches this page's window and re-sorts in memory instead.
+        skip: search ? undefined : skip,
+        take: search ? skip + limit : limit,
         orderBy,
         select: ARTICLE_SELECT,
       }),
       this.prisma.article.count({ where }),
     ]);
 
+    const data = search ? sortMatchesByLanguage(articles, language.id).slice(skip, skip + limit) : articles;
+
     return {
-      data: articles,
+      data,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }

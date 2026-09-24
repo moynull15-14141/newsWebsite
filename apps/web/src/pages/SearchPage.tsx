@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch, withLang } from '@/lib/api';
 import ArticleList from '@/components/ArticleList';
 import SeoHead from '@/components/SeoHead';
+import AdSlot from '@/components/AdSlot';
 import { useLanguage } from '@/lib/i18n';
 
 interface Article {
@@ -213,6 +214,10 @@ export default function SearchPage() {
             <h2 className="text-lg font-semibold text-gray-900">{t('common.somethingWrong')}</h2>
             <p className="mt-2">{t('common.unableToLoad')}</p>
           </div>
+        )}
+
+        {query && !isLoading && !error && articles.length > 0 && (
+          <AdSlot slot="SEARCH_INLINE" pageType="SEARCH" context={query} />
         )}
 
         {query && !isLoading && !error && (

@@ -298,3 +298,14 @@
     animation: none !important;
   }
 }
+
+/* Lets the desktop nav scroll horizontally when items overflow instead of the flex layout squeezing
+   every link's text down until it wraps (see Header.tsx primary nav). */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

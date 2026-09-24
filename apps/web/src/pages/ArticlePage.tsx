@@ -51,7 +51,7 @@ interface Article {
   articleTags?: { tag: Tag }[];
   imageUrl?: string;
   featuredImageUrl?: string;
-  media?: { id: string; publicUrl: string; altText?: string };
+  media?: { id: string; publicUrl: string; altText?: string; width?: number | null; height?: number | null };
   _count?: { comments: number };
   corrections?: { id: string; description: string; correctedAt: string }[];
   language?: ArticleLanguage | null;
@@ -196,7 +196,7 @@ export default function ArticlePage() {
       />
 
       <article className="container-narrow py-8 lg:py-12">
-        <AdSlot slot="ARTICLE_TOP" pageType="article" categoryId={article.category?.id} locationId={article.location?.id} />
+        <AdSlot slot="ARTICLE_TOP" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
         <nav className="mb-6 text-sm text-gray-500">
           <Link to={pathFor('/', code)} className="hover:text-primary-500">{t('common.home')}</Link>
           {article.category && (
@@ -239,6 +239,8 @@ export default function ArticlePage() {
           </p>
         )}
 
+        <AdSlot slot="ARTICLE_AFTER_INTRO" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
+
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-500">
           {article.author && <span className="font-medium text-gray-700">{article.author.name}</span>}
           {article.author && article.publishedAt && <span>&middot;</span>}
@@ -263,13 +265,27 @@ export default function ArticlePage() {
 
         {imageUrl && (
           <figure className="my-8">
-            <img src={imageUrl} alt={article.media?.altText || article.title} className="w-full rounded-lg" />
+            {/* Real intrinsic dimensions (when known — see public-article-select.ts) let the browser
+                reserve the right box before the image loads, so it doesn't jump the article text down
+                once it does. Undefined width/height (an externally-set featuredImageUrl, or an older
+                Media row from before dimension detection existed) just falls back to auto sizing. */}
+            <img
+              src={imageUrl}
+              alt={article.media?.altText || article.title}
+              width={article.media?.width ?? undefined}
+              height={article.media?.height ?? undefined}
+              className="w-full rounded-lg"
+              style={{ aspectRatio: article.media?.width && article.media?.height ? `${article.media.width} / ${article.media.height}` : undefined }}
+              decoding="async"
+            />
           </figure>
         )}
 
         <div lang={articleLanguageCode} className="prose prose-lg max-w-none font-serif">
           {article.content && <TiptapRenderer content={article.content as Record<string, unknown>} />}
         </div>
+
+        <AdSlot slot="ARTICLE_IN_CONTENT" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
 
         {article.corrections?.length ? (
           <aside className="mt-8 border-l-4 border-primary-500 bg-gray-50 px-4 py-3 text-sm text-gray-700">
@@ -295,6 +311,8 @@ export default function ArticlePage() {
           </div>
         )}
 
+        <AdSlot slot="ARTICLE_MID" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
+
         <div className="mt-8 border-t border-gray-200 pt-6">
           <div className="flex flex-wrap gap-2">
             <BookmarkButton articleId={article.id} />
@@ -304,13 +322,14 @@ export default function ArticlePage() {
             {typeof navigator.share === 'function' && <button onClick={() => handleShare('native')} className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">{t('common.share')}</button>}
           </div>
         </div>
-        <AdSlot slot="ARTICLE_BOTTOM" pageType="article" categoryId={article.category?.id} locationId={article.location?.id} />
+        <AdSlot slot="ARTICLE_END" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
         <CommentsSection slug={article.slug} count={article._count?.comments} />
       </article>
 
       {related && related.length > 0 && (
         <section className="container-wide border-t border-neutral-200 py-12">
           <h2 className="mb-6 text-2xl font-bold text-neutral-900">{t('common.relatedArticles')}</h2>
+          <AdSlot slot="ARTICLE_RELATED" pageType="ARTICLE" categoryId={article.category?.id} locationId={article.location?.id} context={article.slug} />
           <div className="grid gap-6 md:grid-cols-3 lg:grid-cols-4">
             {related.slice(0, 4).map((a) => (
               <ArticleCard key={a.id} article={a} variant="standard" />

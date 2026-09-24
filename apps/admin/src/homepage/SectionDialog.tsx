@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import Dialog from '../components/Dialog';
 import { apiFetch } from '../lib/api';
 import ErrorAlert from './ErrorAlert';
-import { availableSectionTypes, isManualSource, maxItemsBounds, MAX_SECTION_ITEMS, requiredSourceLink, supportsCategoryLink } from './logic';
+import { availableSectionTypes, isManualSource, maxItemsBounds, MAX_SECTION_ITEMS, requiredSourceLink, resolveDefaultSourceForType, supportsCategoryLink } from './logic';
 import { cardVariantLabel, layoutMeta, sectionTypeLabel, sourceTypeMeta } from './labels';
 import type { ActionResult } from './useHomepageBuilder';
 import type { Draft, DraftSection, SourceType } from './types';
@@ -34,6 +34,7 @@ interface SectionDialogProps {
 interface Named {
   id: string;
   name: string;
+  slug?: string;
 }
 interface LocationOption extends Named {
   type: string;
@@ -68,14 +69,23 @@ export default function SectionDialog({ draft, section, busy, onSubmit, onClose,
   // A category link doubles as the section's "View all" target, so it stays offered for manual sections.
   const showOptionalCategory = !requiredLink && supportsCategoryLink(type);
 
+  // Also fetched (not just when the matching source is already selected) whenever a section is being
+  // added: `changeType` below needs both lists on hand to auto-apply a preset type's default source
+  // (e.g. "Bangladesh" -> Location "Bangladesh") the moment the editor picks the type, rather than
+  // silently leaving the section unscoped until they separately think to set it themselves.
   const { data: categories } = useQuery<Named[]>({
     queryKey: ['categories'],
     queryFn: () => apiFetch('/categories'),
-    enabled: sourceType === 'CATEGORY' || showOptionalCategory,
+    enabled: sourceType === 'CATEGORY' || showOptionalCategory || !editing,
   });
   const { data: tags } = useQuery<Named[]>({ queryKey: ['tags'], queryFn: () => apiFetch('/tags'), enabled: sourceType === 'TAG' });
-  const { data: locations } = useQuery<LocationOption[]>({ queryKey: ['locations'], queryFn: () => apiFetch('/locations'), enabled: sourceType === 'LOCATION' });
+  const { data: locations } = useQuery<LocationOption[]>({ queryKey: ['locations'], queryFn: () => apiFetch('/locations'), enabled: sourceType === 'LOCATION' || !editing });
 
+  // Country-level rows (just "Bangladesh" today) were previously left out of this list entirely, so a
+  // section whose sourceType/locationId already pointed at one (see SECTION_TYPE_DEFAULT_SOURCE above)
+  // rendered as if nothing were selected — nothing here forced the mis-scoped "Latest" bug on its own, but
+  // it meant there was no way to knowingly pick "the whole country" versus a specific division/district.
+  const countries = useMemo(() => (locations ?? []).filter((location) => location.type === 'COUNTRY'), [locations]);
   const divisions = useMemo(() => (locations ?? []).filter((location) => location.type === 'DIVISION'), [locations]);
   const districts = useMemo(() => (locations ?? []).filter((location) => location.type === 'DISTRICT'), [locations]);
 
@@ -92,7 +102,25 @@ export default function SectionDialog({ draft, section, busy, onSubmit, onClose,
     // Keep a title the editor typed; only replace the one we suggested.
     if (!title.trim() || title === (type === 'CUSTOM' ? '' : sectionTypeLabel(type))) setTitle(next === 'CUSTOM' ? '' : sectionTypeLabel(next));
     setType(next);
-    if (next === 'HERO') setSourceType('MANUAL');
+    if (next === 'HERO') {
+      setSourceType('MANUAL');
+      return;
+    }
+    // A preset type (e.g. "Bangladesh") has an obvious real-world source — pick it automatically so the
+    // section is scoped correctly from the moment it's created, instead of defaulting to unfiltered
+    // "Latest" until someone notices and fixes it separately (see resolveDefaultSourceForType's comment).
+    const resolved = resolveDefaultSourceForType(next, categories, locations);
+    if (resolved) {
+      setSourceType(resolved.sourceType);
+      setCategoryId(resolved.categoryId ?? '');
+      setLocationId(resolved.locationId ?? '');
+      setTagId('');
+    } else {
+      setSourceType('MANUAL');
+      setCategoryId('');
+      setTagId('');
+      setLocationId('');
+    }
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -143,6 +171,11 @@ export default function SectionDialog({ draft, section, busy, onSubmit, onClose,
         <SourceLink id={`${baseId}-location`} label="Location" error={showErrors ? linkError : ''} hint="A division also includes stories from its districts.">
           <select id={`${baseId}-location`} value={locationId} onChange={(event) => setLocationId(event.target.value)} aria-invalid={showErrors && !!linkError} className={inputClass}>
             <option value="">Choose a location…</option>
+            {countries.length > 0 && (
+              <optgroup label="Whole country">
+                {countries.map((location) => <option key={location.id} value={location.id}>{location.name} (all divisions/districts)</option>)}
+              </optgroup>
+            )}
             <optgroup label="Divisions">
               {divisions.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
             </optgroup>

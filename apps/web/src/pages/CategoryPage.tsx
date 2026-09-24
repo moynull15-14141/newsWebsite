@@ -108,7 +108,7 @@ export default function CategoryPage() {
         <h1 className="text-3xl font-bold text-neutral-950 sm:text-4xl">{title}</h1>
         {description && <p className="mt-2 max-w-2xl text-neutral-600">{description}</p>}
       </header>
-      <AdSlot slot="CATEGORY_TOP" pageType="category" categoryId={category.id} />
+      <AdSlot slot="CATEGORY_TOP" pageType="CATEGORY" categoryId={category.id} context={slug} />
       <DiscoveryFeed
         articles={articles}
         meta={data?.meta}
@@ -117,6 +117,7 @@ export default function CategoryPage() {
         emptyMessage={t('common.noArticlesFound')}
         feedHeadingId="category-latest"
       />
+      <AdSlot slot="CATEGORY_MID" pageType="CATEGORY" categoryId={category.id} context={slug} />
     </Container>
   </>;
 }

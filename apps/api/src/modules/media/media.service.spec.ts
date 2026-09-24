@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { MediaService } from './media.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
@@ -48,6 +49,14 @@ describe('MediaService', () => {
     }),
     delete: jest.fn().mockResolvedValue(undefined),
     getPublicUrl: jest.fn().mockReturnValue('http://test.com/test.jpg'),
+    exists: jest.fn().mockResolvedValue(true),
+    readObject: jest.fn().mockResolvedValue(JPEG_SIGNATURE),
+    createPresignedUpload: jest.fn().mockResolvedValue({
+      uploadUrl: 'http://test.com/presigned',
+      key: 'media/presigned-key.jpg',
+      expiresIn: 600,
+      requiredHeaders: { 'Content-Type': 'image/jpeg' },
+    }),
   };
 
   beforeEach(async () => {
@@ -61,16 +70,21 @@ describe('MediaService', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
-      // Referenced-media protection (remove()) checks these three relations before deleting.
-      article: { count: jest.fn().mockResolvedValue(0) },
-      ad: { count: jest.fn().mockResolvedValue(0) },
-      editorialCollection: { count: jest.fn().mockResolvedValue(0) },
+      // Referenced-media protection (remove()) checks these relations before deleting.
+      article: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      ad: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      editorialCollection: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      readerProfile: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      adCreative: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      employer: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
+      $transaction: jest.fn((ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediaService,
         { provide: PrismaService, useValue: prisma },
+        { provide: ConfigService, useValue: { get: (_key: string, fallback?: unknown) => fallback } },
         { provide: 'StorageProvider', useValue: mockStorage },
       ],
     }).compile();
@@ -117,8 +131,8 @@ describe('MediaService', () => {
 
       const keys = (storage.upload as jest.Mock).mock.calls.map(([, key]) => key);
       expect(keys[0]).not.toBe(keys[1]);
-      // Server-generated, never the raw original filename — the actual collision-avoidance mechanism.
-      expect(keys[0]).toMatch(/^media\/[a-z0-9]+-[a-z0-9]+\.jpg$/);
+      // Server-generated UUID, never the raw original filename — the actual collision-avoidance mechanism.
+      expect(keys[0]).toMatch(/^media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/);
     });
 
     it('rejects a file whose bytes do not match its claimed MIME type (spoofed Content-Type)', async () => {
@@ -301,6 +315,140 @@ describe('MediaService', () => {
 
       expect(result.message).toBe('Media deleted successfully');
       expect(storage.delete).toHaveBeenCalledWith('media/test.jpg');
+    });
+  });
+
+  describe('createPresignedUpload', () => {
+    const dto = { filename: 'photo.jpg', contentType: 'image/jpeg', size: 1024 * 1024 };
+
+    it('rejects a disallowed content type', async () => {
+      await expect(service.createPresignedUpload({ ...dto, contentType: 'application/pdf' } as any, 'u1')).rejects.toThrow(BadRequestException);
+      expect(storage.createPresignedUpload).not.toHaveBeenCalled();
+    });
+
+    it('rejects a size over the purpose\'s limit', async () => {
+      await expect(service.createPresignedUpload({ ...dto, purpose: 'avatar', size: 6 * 1024 * 1024 } as any, 'u1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('creates an UPLOADING media row and returns the presigned URL', async () => {
+      prisma.media.create.mockResolvedValue({ id: 'm1' });
+
+      const result = await service.createPresignedUpload(dto as any, 'u1');
+
+      expect(prisma.media.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'UPLOADING', uploadedById: 'u1' }),
+      }));
+      expect(result).toMatchObject({ mediaId: 'm1', uploadUrl: 'http://test.com/presigned', expiresIn: 600 });
+    });
+
+    it('namespaces the object key by purpose', async () => {
+      prisma.media.create.mockResolvedValue({ id: 'm1' });
+      await service.createPresignedUpload({ ...dto, purpose: 'ad' } as any, 'u1');
+      const [key] = (storage.createPresignedUpload as jest.Mock).mock.calls[0];
+      expect(key).toMatch(/^ads\//);
+    });
+
+    it('scopes an avatar key to the uploading user, not a client-supplied user id', async () => {
+      prisma.media.create.mockResolvedValue({ id: 'm1' });
+      await service.createPresignedUpload({ ...dto, purpose: 'avatar' } as any, 'the-real-uploader');
+      const [key] = (storage.createPresignedUpload as jest.Mock).mock.calls[0];
+      expect(key).toMatch(/^avatars\/the-real-uploader\//);
+    });
+  });
+
+  describe('completeUpload', () => {
+    const uploadingMedia = { id: 'm1', status: 'UPLOADING', uploadedById: 'u1', storageKey: 'articles/x/original.jpg', mimeType: 'image/jpeg' };
+
+    it('rejects completing another user\'s upload without media.manage', async () => {
+      prisma.media.findUnique.mockResolvedValue(uploadingMedia);
+      await expect(service.completeUpload('m1', 'someone-else', [])).rejects.toThrow(/cannot complete/);
+    });
+
+    it('allows completing another user\'s upload with media.manage', async () => {
+      prisma.media.findUnique.mockResolvedValue(uploadingMedia);
+      prisma.media.update.mockResolvedValue({ ...uploadingMedia, status: 'READY' });
+      await expect(service.completeUpload('m1', 'admin', ['media.manage'])).resolves.toBeDefined();
+    });
+
+    it('rejects completing a media row that is not UPLOADING', async () => {
+      prisma.media.findUnique.mockResolvedValue({ ...uploadingMedia, status: 'READY' });
+      await expect(service.completeUpload('m1', 'u1', [])).rejects.toThrow(BadRequestException);
+    });
+
+    it('marks FAILED and rejects when the object does not actually exist in storage (never trusts the client)', async () => {
+      prisma.media.findUnique.mockResolvedValue(uploadingMedia);
+      (storage.exists as jest.Mock).mockResolvedValueOnce(false);
+
+      await expect(service.completeUpload('m1', 'u1', [])).rejects.toThrow(BadRequestException);
+      expect(prisma.media.update).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { status: 'FAILED' } });
+    });
+
+    it('marks FAILED and deletes the object when the uploaded bytes do not match the declared MIME type', async () => {
+      prisma.media.findUnique.mockResolvedValue(uploadingMedia);
+      (storage.readObject as jest.Mock).mockResolvedValueOnce(PNG_SIGNATURE);
+
+      await expect(service.completeUpload('m1', 'u1', [])).rejects.toThrow(BadRequestException);
+      expect(storage.delete).toHaveBeenCalledWith('articles/x/original.jpg');
+    });
+
+    it('transitions to READY and clears uploadExpiresAt on a genuinely-verified upload', async () => {
+      prisma.media.findUnique.mockResolvedValue(uploadingMedia);
+      prisma.media.update.mockResolvedValue({ ...uploadingMedia, status: 'READY' });
+
+      await service.completeUpload('m1', 'u1', []);
+
+      expect(prisma.media.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'READY', uploadExpiresAt: null }),
+      }));
+    });
+  });
+
+  describe('replace', () => {
+    it('rejects replacing media uploaded by someone else without media.manage', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      await expect(service.replace('1', mockFile, 'someone-else', [])).rejects.toThrow(/did not upload/);
+    });
+
+    it('uploads a new file and repoints every reference from the old id to the new one', async () => {
+      prisma.media.findUnique.mockResolvedValue(mockMedia);
+      prisma.media.create.mockResolvedValue({ ...mockMedia, id: 'new-id' });
+
+      const result = await service.replace('1', mockFile, 'u1', []);
+
+      expect(result.id).toBe('new-id');
+      expect(prisma.article.updateMany).toHaveBeenCalledWith({ where: { featuredImageId: '1' }, data: { featuredImageId: 'new-id' } });
+      expect(prisma.readerProfile.updateMany).toHaveBeenCalledWith({ where: { avatarMediaId: '1' }, data: { avatarMediaId: 'new-id' } });
+    });
+  });
+
+  describe('findOrphanCandidates', () => {
+    it('reports stalled (expired, never-completed) presigned uploads', async () => {
+      prisma.media.findMany
+        .mockResolvedValueOnce([{ id: 'stalled-1', originalFilename: 'x.jpg' }])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.findOrphanCandidates();
+      expect(result.stalledUploads).toEqual([{ id: 'stalled-1', originalFilename: 'x.jpg' }]);
+    });
+
+    it('reports READY media referenced by nothing as unreferenced, excluding anything referenced', async () => {
+      prisma.media.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { id: 'orphan-1', originalFilename: 'a.jpg', storageKey: 'k1', size: 1, createdAt: new Date(), featuredArticles: [], ads: [], collectionCovers: [], readerAvatars: [], adCreativeDesktopFor: [], adCreativeMobileFor: [], employerLogos: [], employerCovers: [] },
+          { id: 'in-use-1', originalFilename: 'b.jpg', storageKey: 'k2', size: 1, createdAt: new Date(), featuredArticles: [{ id: 'art-1' }], ads: [], collectionCovers: [], readerAvatars: [], adCreativeDesktopFor: [], adCreativeMobileFor: [], employerLogos: [], employerCovers: [] },
+        ]);
+
+      const result = await service.findOrphanCandidates();
+
+      expect(result.unreferenced.map((m: any) => m.id)).toEqual(['orphan-1']);
+    });
+
+    it('never deletes anything — detection only', async () => {
+      prisma.media.findMany.mockResolvedValue([]);
+      await service.findOrphanCandidates();
+      expect(prisma.media.delete).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
     });
   });
 });

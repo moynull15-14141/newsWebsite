@@ -17,6 +17,9 @@ interface Article {
   imageUrl?: string;
   featuredImageUrl?: string;
   media?: { id: string; publicUrl: string } | null;
+  /** Present on every public listing (see ARTICLE_SELECT). Cross-language search results (see
+   *  SearchPage) can return a story that isn't in the reader's current UI language at all. */
+  language?: { code: string; nativeName: string } | null;
 }
 
 export type ArticleCardVariant =
@@ -79,6 +82,18 @@ function ArticleCategory({ category }: { category?: Article['category'] }) {
   );
 }
 
+/** Only rendered when a listing (cross-language search) can mix languages — flags that this specific
+ *  result is not in the language the reader is currently browsing in, before they click through. */
+function ArticleLanguageBadge({ language }: { language?: Article['language'] }) {
+  const { code } = useLanguage();
+  if (!language || language.code === code) return null;
+  return (
+    <Badge variant="neutral" className="mb-2 ml-2 max-w-full truncate">
+      {language.nativeName}
+    </Badge>
+  );
+}
+
 export function ArticleCardSkeleton({ variant = 'standard' }: { variant?: ArticleCardVariant }) {
   const mediaTop = variant === 'featured' || variant === 'large' || variant === 'image-top' || variant === 'video';
   const horizontal = variant === 'compact' || variant === 'horizontal' || variant === 'standard';
@@ -120,7 +135,11 @@ export function ArticleCardSkeleton({ variant = 'standard' }: { variant?: Articl
 
 export default function ArticleCard({ article, variant = 'standard' }: ArticleCardProps) {
   const { code, pathFor } = useLanguage();
-  const articleHref = pathFor(`/article/${article.slug}`, code);
+  // A cross-language search result carries ITS OWN language, not the reader's current one — routing
+  // through the reader's `code` would build e.g. `/en/article/<bn-slug>`, an English-prefixed URL for
+  // Bengali content. The slug lookup itself is language-agnostic (see public.service.ts), so that URL
+  // would still render the right article, but under a URL that lies about what language it's in.
+  const articleHref = pathFor(`/article/${article.slug}`, article.language?.code ?? code);
   const imageUrl = article.featuredImageUrl || article.imageUrl || article.media?.publicUrl;
 
   const renderImage = (className: string, aspect = '16/9') => (
@@ -135,6 +154,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 p-6">
             <ArticleCategory category={article.category} />
+            <ArticleLanguageBadge language={article.language} />
             <h2 lang={contentLanguage(article.title)} className={`text-white ${variant === 'featured' ? 'text-2xl font-bold' : 'text-xl font-bold'}`}>
               {article.title}
             </h2>
@@ -155,6 +175,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
           {renderImage('h-16 w-20 flex-shrink-0 rounded object-cover', '4/3')}
           <div className="min-w-0 flex-1">
             <ArticleCategory category={article.category} />
+            <ArticleLanguageBadge language={article.language} />
             <h3 lang={contentLanguage(article.title)} className="line-clamp-2 text-sm font-semibold leading-snug text-neutral-800 transition-colors group-hover:text-primary-500">
               {article.title}
             </h3>
@@ -176,6 +197,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
           {renderImage('h-24 w-32 flex-shrink-0 rounded object-cover', '4/3')}
           <div className="min-w-0 flex-1">
             <ArticleCategory category={article.category} />
+            <ArticleLanguageBadge language={article.language} />
             <h3 lang={contentLanguage(article.title)} className="text-base font-bold leading-snug text-neutral-800 transition-colors group-hover:text-primary-500">
               {article.title}
             </h3>
@@ -196,6 +218,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
           {renderImage('h-[200px] w-full object-cover', '16/9')}
           <div className="p-5">
             <ArticleCategory category={article.category} />
+            <ArticleLanguageBadge language={article.language} />
             <h3 lang={contentLanguage(article.title)} className="card-title text-neutral-800 mb-3 group-hover:text-primary-500">
               {article.title}
             </h3>
@@ -214,6 +237,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
       <Link to={articleHref} className="group block min-w-0">
         <article className="p-6">
           <ArticleCategory category={article.category} />
+          <ArticleLanguageBadge language={article.language} />
           <h2 className="heading-2 text-neutral-800 mb-4 group-hover:text-primary-500">
             {article.title}
           </h2>
@@ -240,6 +264,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
           </div>
           <div className="p-5">
             <ArticleCategory category={article.category} />
+            <ArticleLanguageBadge language={article.language} />
             <h3 lang={contentLanguage(article.title)} className="card-title text-neutral-800 mb-3 group-hover:text-primary-500">
               {article.title}
             </h3>
@@ -263,6 +288,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
                 Opinion
               </span>
               <ArticleCategory category={article.category} />
+              <ArticleLanguageBadge language={article.language} />
             </div>
             <h3 lang={contentLanguage(article.title)} className="card-title text-neutral-800 mb-3 group-hover:text-primary-500">
               {article.title}
@@ -284,6 +310,7 @@ export default function ArticleCard({ article, variant = 'standard' }: ArticleCa
         {renderImage('h-28 w-36 flex-shrink-0 rounded object-cover sm:h-32 sm:w-40', '4/3')}
         <div className="min-w-0 flex-1">
           <ArticleCategory category={article.category} />
+          <ArticleLanguageBadge language={article.language} />
           <h3 lang={contentLanguage(article.title)} className="line-clamp-2 text-base font-bold leading-snug text-neutral-800 transition-colors group-hover:text-primary-500">
             {article.title}
           </h3>

@@ -41,6 +41,7 @@ export class MostReadService {
         author: { select: { id: true, name: true } },
         category: { select: { id: true, name: true, slug: true } },
         location: { select: { id: true, name: true, slug: true, type: true } },
+        media: { select: { id: true, publicUrl: true, altText: true, width: true, height: true } },
         views: {
           where: { viewedAt: { gte: since } },
           select: { id: true },

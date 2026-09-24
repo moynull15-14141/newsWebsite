@@ -7,6 +7,7 @@ type QueryResult = { data: unknown; isLoading: boolean; error: unknown };
 type MutationResult = { mutate: () => void; isPending: boolean; isError: boolean; error: unknown };
 let mockMediaQuery: () => QueryResult;
 let mockUploadMutation: () => MutationResult;
+let mockReplaceMutation: () => MutationResult;
 let mockUpdateMutation: () => MutationResult;
 let mockDeleteMutation: () => MutationResult;
 
@@ -27,7 +28,8 @@ function nextMutation(): MutationResult {
 }
 
 function renderMediaPage() {
-  mutationQueue = [mockUploadMutation(), mockUpdateMutation(), mockDeleteMutation()];
+  // Order must match MediaPage's own useMutation declaration order: upload, replace, update, delete.
+  mutationQueue = [mockUploadMutation(), mockReplaceMutation(), mockUpdateMutation(), mockDeleteMutation()];
   return renderToStaticMarkup(<MediaPage />);
 }
 
@@ -44,6 +46,7 @@ const mediaItem = {
   credit: null,
   width: 800,
   height: 600,
+  status: 'READY' as const,
   uploadedBy: { id: 'u1', name: 'Admin' },
   createdAt: '2026-09-20T00:00:00.000Z',
 };
@@ -52,6 +55,7 @@ const noopMutation: () => MutationResult = () => ({ mutate: vi.fn(), isPending: 
 
 beforeEach(() => {
   mockUploadMutation = noopMutation;
+  mockReplaceMutation = noopMutation;
   mockUpdateMutation = noopMutation;
   mockDeleteMutation = noopMutation;
 });
@@ -78,6 +82,15 @@ describe('MediaPage — grid rendering', () => {
     expect(markup).toContain('800×600');
     expect(markup).toContain('200 KB');
     expect(markup).toContain('alt="A sunset"');
+  });
+});
+
+describe('MediaPage — upload status', () => {
+  it('renders a non-READY item as a status placeholder, never as a broken/guessed image', () => {
+    mockMediaQuery = () => ({ data: { data: [{ ...mediaItem, status: 'UPLOADING' }], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } }, isLoading: false, error: null });
+    const markup = renderMediaPage();
+    expect(markup).not.toContain('<img');
+    expect(markup).toContain('UPLOADING');
   });
 });
 
@@ -119,5 +132,12 @@ describe('MediaPage — error states', () => {
     mockDeleteMutation = () => ({ mutate: vi.fn(), isPending: false, isError: true, error: new Error('Cannot delete: this media is still used as the featured image/cover for 1 article.') });
     const markup = renderMediaPage();
     expect(markup).toContain('still used as the featured image');
+  });
+
+  it('surfaces a replace failure instead of failing silently', () => {
+    mockMediaQuery = () => ({ data: { data: [mediaItem], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } }, isLoading: false, error: null });
+    mockReplaceMutation = () => ({ mutate: vi.fn(), isPending: false, isError: true, error: new Error('API error: 400') });
+    const markup = renderMediaPage();
+    expect(markup).toContain('Replace failed');
   });
 });

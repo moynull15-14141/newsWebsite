@@ -52,6 +52,15 @@ function LanguageSwitcher() {
 
   if (languages.length < 2) return null;
 
+  // `q` (SearchPage.tsx) is a free-text query typed in the CURRENT language, so carrying it verbatim
+  // into the other language's URL sends e.g. a Bengali phrase into the English search — which never
+  // matches English-language articles even when a translated version of the same story exists (the
+  // reader reads that as "no English version" rather than "wrong-language search text"). Structural
+  // params (category, location, dateFrom/dateTo) are language-agnostic slugs, so those still carry over.
+  const targetSearch = new URLSearchParams(location.search);
+  targetSearch.delete('q');
+  const targetSearchString = targetSearch.toString();
+
   return (
     <nav aria-label="Language" className="flex items-center gap-1 text-sm">
       {languages.map((lang, index) => (
@@ -61,7 +70,7 @@ function LanguageSwitcher() {
             <span aria-current="true" className="px-1 font-semibold text-primary-600">{lang.nativeName}</span>
           ) : (
             <Link
-              to={`${pathFor(location.pathname, lang.code)}${location.search}`}
+              to={`${pathFor(location.pathname, lang.code)}${targetSearchString ? `?${targetSearchString}` : ''}`}
               lang={lang.code}
               title={t('language.switchTo', { language: lang.nativeName })}
               className="px-1 text-neutral-500 transition-colors hover:text-primary-500"
@@ -168,13 +177,13 @@ export default function Header() {
         <div className="flex items-center justify-between gap-3 border-b border-neutral-100 py-1.5 text-xs">
           <LanguageSwitcher />
         </div>
-        <div className="flex items-center justify-between py-3 lg:py-4">
-          <Link to={link('/')} className="flex items-center gap-2">
-            <span className="text-xl font-bold tracking-tight text-primary-500 lg:text-2xl">
+        <div className="flex items-center justify-between gap-3 py-3 lg:py-4">
+          <Link to={link('/')} className="flex shrink-0 items-center gap-2">
+            <span className="whitespace-nowrap text-xl font-bold tracking-tight text-primary-500 lg:text-2xl">
               {t('header.siteName')}
             </span>
             {breakingCount > 0 && (
-              <span className="relative flex h-5 w-5 items-center justify-center">
+              <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
                 <AlertTriangle className="h-4 w-4 text-error-500" />
                 <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-error-500 text-[9px] font-bold text-white">
                   {breakingCount}
@@ -184,15 +193,18 @@ export default function Header() {
           </Link>
 
           {/* Nav + search + account cluster together on the right, instead of `justify-between` spreading
-              three loose groups across the whole bar and leaving awkward empty gaps on wide screens. */}
-          <div className="ml-auto flex items-center gap-4">
-            <nav aria-label={t('header.primaryNav')} className="hidden items-center gap-1 xl:flex">
+              three loose groups across the whole bar and leaving awkward empty gaps on wide screens.
+              `min-w-0` on this cluster (and `overflow-x-auto` on the nav itself below) lets the nav
+              scroll horizontally when categories overflow, instead of every link's text getting
+              flex-shrunk down until it wraps mid-word. */}
+          <div className="ml-auto flex min-w-0 items-center gap-3">
+            <nav aria-label={t('header.primaryNav')} className="no-scrollbar hidden min-w-0 items-center gap-1 overflow-x-auto xl:flex">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
                   to={link(item.href)}
                   aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
-                  className={`nav rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
+                  className={`nav shrink-0 whitespace-nowrap rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
                 >
                   {item.label}
                 </Link>
@@ -201,7 +213,7 @@ export default function Header() {
 
             {/* Always-visible search field on larger screens, so it reads as "type here to search" rather
                 than a bare icon the reader has to guess at; collapses to the icon toggle below xl. */}
-            <form onSubmit={handleSearch} className="hidden xl:block">
+            <form onSubmit={handleSearch} className="hidden shrink-0 xl:block">
               <label htmlFor="site-search-inline" className="sr-only">{t('header.searchAria')}</label>
               <div className="relative">
                 <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -212,12 +224,12 @@ export default function Header() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={t('common.searchArticles')}
                   maxLength={200}
-                  className="w-48 rounded-full border border-neutral-300 bg-neutral-50 py-2 pl-9 pr-3 text-sm transition-colors focus:w-64 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  className="w-40 rounded-full border border-neutral-300 bg-neutral-50 py-2 pl-9 pr-3 text-sm transition-colors focus:w-56 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                 />
               </div>
             </form>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <IconButton
                 variant="default"
                 size="md"
@@ -229,15 +241,15 @@ export default function Header() {
               >
                 <Search size={20} />
               </IconButton>
-              <Link to={link('/employer')} className="hidden rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 md:block">
+              <Link to={link('/employer')} className="hidden whitespace-nowrap rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 md:block">
                 {t('nav.forEmployers')}
               </Link>
               {!user ? (
                 <div className="hidden items-center gap-2 sm:flex">
-                  <Link to={link('/login')} className="rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100">
+                  <Link to={link('/login')} className="whitespace-nowrap rounded px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100">
                     {t('common.signIn')}
                   </Link>
-                  <Link to={link('/register')} className="rounded bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600">
+                  <Link to={link('/register')} className="whitespace-nowrap rounded bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600">
                     {t('auth.register')}
                   </Link>
                 </div>

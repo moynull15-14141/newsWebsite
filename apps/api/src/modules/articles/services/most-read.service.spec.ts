@@ -117,5 +117,21 @@ describe('MostReadService', () => {
         }),
       );
     });
+
+    // Regression: see the matching test in trending.service.spec.ts for the full rationale — a most-read
+    // article missing `media` here silently showed no thumbnail in the homepage's "Top stories" rail.
+    it('selects the media relation so most-read articles carry a featured-image thumbnail', async () => {
+      prisma.article.findMany.mockResolvedValue([mockArticle1]);
+
+      await service.getMostRead();
+
+      expect(prisma.article.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            media: { select: { id: true, publicUrl: true, altText: true, width: true, height: true } },
+          }),
+        }),
+      );
+    });
   });
 });

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 import { formatFileSize } from '../lib/media';
-import { Upload, Search, Trash2, Edit, X, Image as ImageIcon } from 'lucide-react';
+import { Upload, Search, Trash2, Edit, X, Image as ImageIcon, RefreshCw } from 'lucide-react';
 
 interface MediaItem {
   id: string;
@@ -18,28 +18,40 @@ interface MediaItem {
   credit: string | null;
   width: number | null;
   height: number | null;
+  status: 'UPLOADING' | 'READY' | 'FAILED' | 'DELETED';
   uploadedBy: { id: string; name: string };
   createdAt: string;
 }
 
+const MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
 export default function MediaPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [mimeType, setMimeType] = useState('');
+  const [status, setStatus] = useState('');
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [altText, setAltText] = useState('');
   const [caption, setCaption] = useState('');
   const [credit, setCredit] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['media', page, search],
-    queryFn: () =>
-      apiFetch<{
+    queryKey: ['media', page, search, mimeType, status],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), limit: '20' });
+      if (search) params.set('search', search);
+      if (mimeType) params.set('mimeType', mimeType);
+      if (status) params.set('status', status);
+      return apiFetch<{
         data: MediaItem[];
         meta: { page: number; limit: number; total: number; totalPages: number };
-      }>(`/media?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`),
+      }>(`/media?${params.toString()}`);
+    },
   });
 
   const uploadMutation = useMutation({
@@ -47,6 +59,15 @@ export default function MediaPage() {
       const formData = new FormData();
       formData.append('file', file);
       return apiFetch('/media', { method: 'POST', body: formData, headers: {} });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['media'] }),
+  });
+
+  const replaceMutation = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiFetch(`/media/${id}/replace`, { method: 'POST', body: formData, headers: {} });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['media'] }),
   });
@@ -92,6 +113,20 @@ export default function MediaPage() {
     }
   };
 
+  const handleReplaceClick = (id: string) => {
+    setReplaceTargetId(id);
+    replaceInputRef.current?.click();
+  };
+
+  const handleReplaceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && replaceTargetId) {
+      replaceMutation.mutate({ id: replaceTargetId, file });
+      if (replaceInputRef.current) replaceInputRef.current.value = '';
+      setReplaceTargetId(null);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -109,14 +144,21 @@ export default function MediaPage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/gif"
           onChange={handleFileChange}
+          className="hidden"
+        />
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleReplaceFileChange}
           className="hidden"
         />
       </div>
 
-      <div className="mt-6 flex gap-4">
-        <div className="relative flex-1">
+      <div className="mt-6 flex flex-wrap gap-4">
+        <div className="relative min-w-[16rem] flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <input
             type="text"
@@ -127,11 +169,37 @@ export default function MediaPage() {
             className="w-full rounded-md border border-gray-300 py-2 pl-10 pr-3 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
           />
         </div>
+        <select
+          value={mimeType}
+          onChange={(e) => { setMimeType(e.target.value); setPage(1); }}
+          aria-label="Filter by file type"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+        >
+          <option value="">All types</option>
+          {MIME_TYPES.map((m) => <option key={m} value={m}>{m.replace('image/', '')}</option>)}
+        </select>
+        <select
+          value={status}
+          onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+          aria-label="Filter by status"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+        >
+          <option value="">All statuses</option>
+          <option value="READY">Ready</option>
+          <option value="UPLOADING">Uploading</option>
+          <option value="FAILED">Failed</option>
+        </select>
       </div>
 
       {uploadMutation.isError && (
         <div role="alert" className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-700">
           Upload failed: {getApiErrorMessage(uploadMutation.error, 'Please try again.')}
+        </div>
+      )}
+
+      {replaceMutation.isError && (
+        <div role="alert" className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-700">
+          Replace failed: {getApiErrorMessage(replaceMutation.error, 'Please try again.')}
         </div>
       )}
 
@@ -156,11 +224,15 @@ export default function MediaPage() {
               className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white"
             >
               <div className="aspect-square overflow-hidden bg-gray-100">
-                <img
-                  src={item.publicUrl}
-                  alt={item.altText || item.originalFilename}
-                  className="h-full w-full object-cover"
-                />
+                {item.status === 'READY' ? (
+                  <img
+                    src={item.publicUrl}
+                    alt={item.altText || item.originalFilename}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase text-gray-400">{item.status}</div>
+                )}
               </div>
               <div className="p-2">
                 <p className="truncate text-xs text-gray-700" title={item.originalFilename}>
@@ -173,6 +245,15 @@ export default function MediaPage() {
                 <p className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleDateString()}</p>
               </div>
               <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                {hasPermission('media.upload') && (
+                  <button
+                    onClick={() => handleReplaceClick(item.id)}
+                    aria-label={`Replace ${item.originalFilename}`}
+                    className="rounded bg-white p-1.5 shadow-sm hover:bg-gray-100"
+                  >
+                    <RefreshCw className="h-3 w-3 text-gray-600" />
+                  </button>
+                )}
                 {hasPermission('media.manage') && (
                   <button
                     onClick={() => handleEdit(item)}

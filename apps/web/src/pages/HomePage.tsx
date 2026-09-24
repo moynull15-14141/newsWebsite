@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch, withLang } from '@/lib/api';
 import AdSlot from '@/components/AdSlot';
@@ -42,19 +43,30 @@ export default function HomePage() {
       <div className="order-3 border-t border-neutral-300 pt-5 md:border-l md:border-t-0 md:pl-7 md:pt-0 lg:pl-8"><h2 className="mb-1 border-t-4 border-neutral-900 py-3 text-lg font-bold">{t('common.topStories')}</h2>{secondary.slice(0, 3).map((article) => <StoryRow key={article.id} article={article} compact />)}</div>
     </section> : <p className="py-16 text-center text-neutral-500">{t('home.noStories')}</p>}
 
-    <AdSlot slot="HOME_HERO_BELOW" pageType="homepage" />
+    <AdSlot slot="HOME_HERO" pageType="HOMEPAGE" />
 
     <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-10">
-      <div className="space-y-12">{sections.map((section) => {
-        const articles = uniqueArticles(section.articles, sectionUsed).slice(0, 6);
-        if (!articles.length) return null;
-        articles.forEach((article) => sectionUsed.add(article.id));
-        return <EditorialSection key={section.key} title={section.title} href={section.href ? pathFor(section.href, code) : undefined}>
-          <SectionBody articles={articles} layout={section.layout} cardVariant={section.cardVariant} />
-        </EditorialSection>;
-      })}</div>
-      <div className="space-y-10 lg:border-l lg:border-neutral-300 lg:pl-8"><RankedList title={t('common.mostRead')} articles={ranked.length ? ranked : uniqueArticles(data?.mostRead || [], new Set(hero ? [hero.id] : [])).slice(0, 5)} />{data?.trending && <BriefList title={t('common.trending')} articles={uniqueArticles(data.trending, new Set(hero ? [hero.id] : [])).slice(0, 5)} />}</div>
+      <div className="space-y-12">
+        <AdSlot slot="HOME_FEED" pageType="HOMEPAGE" />
+        {sections.map((section, index) => {
+          const articles = uniqueArticles(section.articles, sectionUsed).slice(0, 6);
+          if (!articles.length) return null;
+          articles.forEach((article) => sectionUsed.add(article.id));
+          return <Fragment key={section.key}>
+            <EditorialSection title={section.title} href={section.href ? pathFor(section.href, code) : undefined}>
+              <SectionBody articles={articles} layout={section.layout} cardVariant={section.cardVariant} />
+            </EditorialSection>
+            {index === 1 && <AdSlot slot="HOME_MID_FEED" pageType="HOMEPAGE" />}
+          </Fragment>;
+        })}
+      </div>
+      <div className="space-y-10 lg:border-l lg:border-neutral-300 lg:pl-8">
+        <RankedList title={t('common.mostRead')} articles={ranked.length ? ranked : uniqueArticles(data?.mostRead || [], new Set(hero ? [hero.id] : [])).slice(0, 5)} />
+        {data?.trending && <BriefList title={t('common.trending')} articles={uniqueArticles(data.trending, new Set(hero ? [hero.id] : [])).slice(0, 5)} />}
+        <AdSlot slot="HOME_SIDEBAR" pageType="HOMEPAGE" />
+      </div>
     </div>
     <div className="mt-12"><NewsletterSignup /></div>
+    <AdSlot slot="HOME_BEFORE_FOOTER" pageType="HOMEPAGE" />
   </Container></>;
 }

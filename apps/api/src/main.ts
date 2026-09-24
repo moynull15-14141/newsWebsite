@@ -11,10 +11,14 @@ import { formatRequestLog, sanitizePathForLogging } from './common/logging/reque
 
 function validateEnvironment() {
   if (process.env.NODE_ENV === 'production') {
-    const required = ['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'WEB_URL', 'API_CORS_ORIGIN', 'STORAGE_PROVIDER'];
+    // Either naming is accepted (see StorageModule.resolveProviderKind) — production just needs to have
+    // picked ONE of them and pointed it at real remote storage, not local disk.
+    const storageProviderVar = process.env.MEDIA_STORAGE_PROVIDER ? 'MEDIA_STORAGE_PROVIDER' : 'STORAGE_PROVIDER';
+    const required = ['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'WEB_URL', 'API_CORS_ORIGIN', storageProviderVar];
     const missing = required.filter((key) => !process.env[key] || process.env[key]?.includes('change-in-production'));
     if (missing.length) throw new Error(`Missing production configuration: ${missing.join(', ')}`);
-    if (process.env.STORAGE_PROVIDER === 'local') throw new Error('Production requires STORAGE_PROVIDER=s3');
+    const isLocal = process.env.MEDIA_STORAGE_PROVIDER ? process.env.MEDIA_STORAGE_PROVIDER === 'local' : process.env.STORAGE_PROVIDER === 'local';
+    if (isLocal) throw new Error('Production requires MEDIA_STORAGE_PROVIDER=r2 (or STORAGE_PROVIDER=s3)');
   }
 
   // Fail fast rather than risk another database-safety incident (see docs/DATABASE-SAFETY.md):
@@ -34,16 +38,30 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const isProduction = process.env.NODE_ENV === 'production';
 
+  // Nest doesn't wire OnModuleDestroy (e.g. PrismaService's $disconnect) to process signals unless
+  // asked to — needed so Render's SIGTERM on redeploy/restart closes the DB connection cleanly.
+  app.enableShutdownHooks();
+
   // API prefix
   app.setGlobalPrefix('api/v1');
 
   // Local media URLs are persisted as /api/v1/media/files/{storageKey}.
-  if ((process.env.STORAGE_PROVIDER || 'local') === 'local') {
+  const isLocalStorage = process.env.MEDIA_STORAGE_PROVIDER
+    ? process.env.MEDIA_STORAGE_PROVIDER === 'local'
+    : (process.env.STORAGE_PROVIDER || 'local') === 'local';
+  if (isLocalStorage) {
     app.use(
       '/api/v1/media/files',
       express.static(path.resolve(process.env.LOCAL_STORAGE_PATH || './uploads')),
     );
   }
+
+  // Local-dev presigned-upload PUT target (see MediaLocalUploadController) — needs the raw request body,
+  // not the JSON/urlencoded parsing Nest's global body parser applies. Registering this raw parser here,
+  // scoped to this one path, doesn't conflict with the global parsers: bodyParser.json()/urlencoded()
+  // only ever consume a request whose Content-Type matches theirs, so an image/* PUT passes through them
+  // untouched and arrives here with its stream intact.
+  app.use('/api/v1/media/local-upload', express.raw({ limit: '25mb', type: () => true }));
 
   // CORS — production requires API_CORS_ORIGIN (enforced by validateEnvironment above); the localhost
   // fallback only ever applies when that variable is unset, i.e. local development.
@@ -113,8 +131,10 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const port = process.env.API_PORT || 3001;
+  // Render (and most PaaS hosts) inject PORT at runtime and require the process to bind to it;
+  // API_PORT remains the local-dev override, and 3001 is the final fallback.
+  const port = process.env.PORT || process.env.API_PORT || 3001;
   await app.listen(port);
-  console.log(`API running on http://localhost:${port}/api/v1`);
+  console.log(`API running on port ${port} (prefix /api/v1)`);
 }
 bootstrap();

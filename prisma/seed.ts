@@ -74,7 +74,15 @@ async function main() {
     { name: 'analytics.view', description: 'View analytics and reports' },
     { name: 'comment.moderate', description: 'Moderate reader comments' },
     { name: 'comment.delete', description: 'Delete reader comments' },
-    { name: 'ad.manage', description: 'Manage advertisements' },
+    { name: 'ad.manage', description: 'Manage advertisements (legacy flat Ad model)' },
+    { name: 'ads.view', description: 'View advertisers, campaigns, creatives and placements' },
+    { name: 'ads.create', description: 'Create advertisers, campaigns and creatives' },
+    { name: 'ads.update', description: 'Edit advertisers, campaigns and creatives' },
+    { name: 'ads.approve', description: 'Approve or reject campaigns pending review' },
+    { name: 'ads.publish', description: 'Activate, schedule, pause and archive campaigns' },
+    { name: 'ads.delete', description: 'Delete draft advertisers, campaigns and creatives' },
+    { name: 'ads.placement.manage', description: 'Enable/disable placements and manage campaign-placement assignments' },
+    { name: 'ads.analytics.view', description: 'View ad impression/click analytics' },
     { name: 'collection.manage', description: 'Manage editorial collections' },
     { name: 'homepage.manage', description: 'Manage homepage editorial sections' },
     { name: 'breaking_news.manage', description: 'Manage the public breaking-news ticker' },
@@ -109,7 +117,7 @@ async function main() {
   console.log('\n🔗 Seeding role permissions...');
   const rolePermissionsMap: Record<string, string[]> = {
     'Super Admin': Object.keys(permissions),
-    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'collection.manage', 'homepage.manage', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.delete', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage', 'employer.verify', 'employer.suspend', 'platform.settings.view', 'platform.settings.manage'],
+    'Admin': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'article.delete', 'audit.read', 'media.upload', 'media.manage', 'user.manage', 'analytics.view', 'comment.moderate', 'comment.delete', 'ad.manage', 'ads.view', 'ads.create', 'ads.update', 'ads.approve', 'ads.publish', 'ads.delete', 'ads.placement.manage', 'ads.analytics.view', 'collection.manage', 'homepage.manage', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.delete', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage', 'employer.verify', 'employer.suspend', 'platform.settings.view', 'platform.settings.manage'],
     'Editor-in-Chief': ['article.create', 'article.read', 'article.edit', 'article.review', 'article.publish', 'audit.read', 'media.upload', 'media.manage', 'analytics.view', 'breaking_news.manage', 'job.create', 'job.read', 'job.edit', 'job.review', 'job.publish', 'job.manage_categories', 'job.manage_employers', 'job_application.view', 'job_application.manage', 'employer.verify', 'employer.suspend', 'platform.settings.view', 'platform.settings.manage'],
     'Editor': ['article.create', 'article.read', 'article.edit', 'article.review', 'audit.read', 'media.upload', 'analytics.view', 'job.create', 'job.read', 'job.edit', 'job.review', 'job_application.view'],
     'Reporter': ['article.create', 'article.read', 'article.edit', 'media.upload', 'job.create', 'job.read', 'job.edit'],
@@ -484,6 +492,46 @@ async function main() {
 
   const superAdminRoleId = roles['Super Admin'];
   const adminEmail = 'admin@bdnews.com';
+
+  // ==================== AD PLACEMENT REGISTRY ====================
+  // System configuration, not ad content: the fixed inventory of WHERE an ad can ever appear (Phase 2Q
+  // spec). Seeded once, upserted so re-running never duplicates or wipes an admin's enabled/disabled
+  // choice for an existing placement (`update: {}` — this seed never overwrites `enabled`).
+  console.log('\n📐 Seeding ad placement registry...');
+  const adPlacements: { key: string; label: string; group: string; description: string; width?: number; height?: number }[] = [
+    { key: 'BREAKING_NEWS_BELOW', label: 'Below Breaking News', group: 'GLOBAL', description: 'Full-width banner directly under the breaking-news ticker.', width: 970, height: 90 },
+    { key: 'TOP_BILLBOARD', label: 'Top Billboard', group: 'GLOBAL', description: 'Full-width billboard at the very top of every page.', width: 970, height: 250 },
+    { key: 'MOBILE_STICKY', label: 'Mobile Sticky Footer', group: 'GLOBAL', description: 'Sticky banner anchored to the bottom of the viewport on mobile.', width: 320, height: 50 },
+    { key: 'HOME_HERO', label: 'Homepage Hero', group: 'HOMEPAGE', description: 'Beside/below the homepage hero story.', width: 300, height: 250 },
+    { key: 'HOME_FEED', label: 'Homepage Feed', group: 'HOMEPAGE', description: 'Native slot inline with the homepage latest-news feed.', width: 728, height: 90 },
+    { key: 'HOME_MID_FEED', label: 'Homepage Mid-Feed', group: 'HOMEPAGE', description: 'Midway through the homepage feed.', width: 728, height: 90 },
+    { key: 'HOME_SIDEBAR', label: 'Homepage Sidebar', group: 'HOMEPAGE', description: 'Homepage sidebar rail.', width: 300, height: 600 },
+    { key: 'HOME_BEFORE_FOOTER', label: 'Homepage Before Footer', group: 'HOMEPAGE', description: 'Full-width banner just above the footer.', width: 970, height: 250 },
+    { key: 'ARTICLE_TOP', label: 'Article Top', group: 'ARTICLE', description: 'Above the article headline.', width: 728, height: 90 },
+    { key: 'ARTICLE_AFTER_INTRO', label: 'Article After Intro', group: 'ARTICLE', description: 'Directly after the opening paragraph.', width: 336, height: 280 },
+    { key: 'ARTICLE_IN_CONTENT', label: 'Article In-Content', group: 'ARTICLE', description: 'Embedded within the article body.', width: 336, height: 280 },
+    { key: 'ARTICLE_MID', label: 'Article Middle', group: 'ARTICLE', description: 'Roughly midway through the article body.', width: 336, height: 280 },
+    { key: 'ARTICLE_END', label: 'Article End', group: 'ARTICLE', description: 'After the article body, before related stories.', width: 728, height: 90 },
+    { key: 'ARTICLE_RELATED', label: 'Article Related Rail', group: 'ARTICLE', description: 'Within the related-articles rail.', width: 300, height: 250 },
+    { key: 'ARTICLE_SIDEBAR', label: 'Article Sidebar', group: 'ARTICLE', description: 'Article page sidebar rail.', width: 300, height: 600 },
+    { key: 'CATEGORY_TOP', label: 'Category Top', group: 'CATEGORY', description: 'Above the category feed.', width: 728, height: 90 },
+    { key: 'CATEGORY_FEED', label: 'Category Feed', group: 'CATEGORY', description: 'Native slot inline with the category feed.', width: 728, height: 90 },
+    { key: 'CATEGORY_MID', label: 'Category Middle', group: 'CATEGORY', description: 'Midway through the category feed.', width: 728, height: 90 },
+    { key: 'CATEGORY_SIDEBAR', label: 'Category Sidebar', group: 'CATEGORY', description: 'Category page sidebar rail.', width: 300, height: 600 },
+    { key: 'SEARCH_INLINE', label: 'Search Results Inline', group: 'SEARCH', description: 'Inline within search results.', width: 728, height: 90 },
+    { key: 'PAGE_TOP', label: 'Generic Page Top', group: 'GENERIC', description: 'Reusable top slot for pages without a dedicated placement.', width: 728, height: 90 },
+    { key: 'PAGE_CONTENT', label: 'Generic Page Content', group: 'GENERIC', description: 'Reusable in-content slot for pages without a dedicated placement.', width: 336, height: 280 },
+    { key: 'PAGE_SIDEBAR', label: 'Generic Page Sidebar', group: 'GENERIC', description: 'Reusable sidebar slot for pages without a dedicated placement.', width: 300, height: 600 },
+    { key: 'PAGE_BOTTOM', label: 'Generic Page Bottom', group: 'GENERIC', description: 'Reusable bottom slot for pages without a dedicated placement.', width: 728, height: 90 },
+  ];
+  for (const p of adPlacements) {
+    await prisma.adPlacement.upsert({
+      where: { key: p.key as any },
+      update: { label: p.label, group: p.group as any, description: p.description, recommendedWidth: p.width, recommendedHeight: p.height },
+      create: { key: p.key as any, label: p.label, group: p.group as any, description: p.description, recommendedWidth: p.width, recommendedHeight: p.height },
+    });
+  }
+  console.log(`  ✓ Ad placements: ${adPlacements.length}`);
 
   const adminUser = await prisma.user.upsert({
     where: { email: adminEmail },

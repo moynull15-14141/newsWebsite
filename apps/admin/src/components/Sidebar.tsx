@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardCheck, Image as ImageIcon, FolderOpen, Tag, MapPin, Users, Settings,
   MessageCircle, Megaphone, BarChart3, LayoutTemplate, Layers, Plus, Globe2, SearchCheck, X, Radio, Briefcase,
-  FolderKanban, Building2, Settings2, ChevronDown,
+  FolderKanban, Building2, Settings2, ChevronDown, Rocket, Handshake, ImagePlus, LayoutGrid, History,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
@@ -47,7 +47,12 @@ const menuGroups: MenuGroup[] = [
   {
     label: 'Growth',
     items: [
-      { label: 'Ads', href: '/ads', icon: Megaphone },
+      { label: 'Ads Overview', href: '/ads', icon: Megaphone, permission: 'ads.view' },
+      { label: 'Campaigns', href: '/ads/campaigns', icon: Rocket, permission: 'ads.view', matchPrefix: '/ads/campaigns' },
+      { label: 'Advertisers', href: '/ads/advertisers', icon: Handshake, permission: 'ads.view' },
+      { label: 'Creatives', href: '/ads/creatives', icon: ImagePlus, permission: 'ads.view' },
+      { label: 'Placements', href: '/ads/placements', icon: LayoutGrid, permission: 'ads.view' },
+      { label: 'Ad Audit Log', href: '/ads/audit', icon: History, permission: 'ads.view' },
       { label: 'Analytics', href: '/analytics', icon: BarChart3 },
       { label: 'SEO Intelligence', href: '/seo', icon: SearchCheck, permission: 'analytics.view' },
     ],

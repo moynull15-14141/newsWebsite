@@ -9,7 +9,13 @@ import RevisionsPage from './pages/RevisionsPage';
 import MediaPage from './pages/MediaPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import CommentsPage from './pages/CommentsPage';
-import AdsPage from './pages/AdsPage';
+import AdsOverviewPage from './pages/ads/AdsOverviewPage';
+import AdsCampaignsPage from './pages/ads/AdsCampaignsPage';
+import AdsCampaignDetailPage from './pages/ads/AdsCampaignDetailPage';
+import AdsAdvertisersPage from './pages/ads/AdsAdvertisersPage';
+import AdsCreativesPage from './pages/ads/AdsCreativesPage';
+import AdsPlacementsPage from './pages/ads/AdsPlacementsPage';
+import AdsAuditLogPage from './pages/ads/AdsAuditLogPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import HomepagePage from './pages/HomepagePage';
 import HomepagePreviewPage from './pages/HomepagePreviewPage';
@@ -51,7 +57,13 @@ function App() {
         <Route path="articles/:id/revisions" element={<RevisionsPage />} />
         <Route path="media" element={<MediaPage />} />
         <Route path="comments" element={<CommentsPage />} />
-        <Route path="ads" element={<AdsPage />} />
+        <Route path="ads" element={<RequirePermission permission="ads.view"><AdsOverviewPage /></RequirePermission>} />
+        <Route path="ads/campaigns" element={<RequirePermission permission="ads.view"><AdsCampaignsPage /></RequirePermission>} />
+        <Route path="ads/campaigns/:id" element={<RequirePermission permission="ads.view"><AdsCampaignDetailPage /></RequirePermission>} />
+        <Route path="ads/advertisers" element={<RequirePermission permission="ads.view"><AdsAdvertisersPage /></RequirePermission>} />
+        <Route path="ads/creatives" element={<RequirePermission permission="ads.view"><AdsCreativesPage /></RequirePermission>} />
+        <Route path="ads/placements" element={<RequirePermission permission="ads.view"><AdsPlacementsPage /></RequirePermission>} />
+        <Route path="ads/audit" element={<RequirePermission permission="ads.view"><AdsAuditLogPage /></RequirePermission>} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="seo" element={<RequirePermission permission="analytics.view"><SeoDashboardPage /></RequirePermission>} />
         <Route path="categories" element={<CategoriesPage />} />

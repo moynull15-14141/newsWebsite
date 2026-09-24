@@ -16,8 +16,8 @@
     "test:cov": "jest --coverage"
   },
   "dependencies": {
-    "@news-platform/seo": "0.1.0",
     "@aws-sdk/client-s3": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1139.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.2.0",
     "@nestjs/core": "^10.3.0",
@@ -25,10 +25,12 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/schedule": "^4.1.2",
+    "@news-platform/seo": "0.1.0",
     "@prisma/client": "^5.10.0",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "image-size": "^2.0.4",
     "multer": "2.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: newssite-api
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: main
+    rootDir: .
+    buildCommand: npm install && npx turbo run build --filter=api
+    startCommand: npm run start:prod --workspace=api
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      # Provisioned Aiven Postgres connection string. Must use sslmode=require. Set in the Render
+      # dashboard, never committed — see docs/DATABASE-SAFETY.md before touching this value.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_EXPIRATION
+        value: 15m
+      - key: JWT_REFRESH_EXPIRATION
+        value: 7d
+      # Canonical production URLs — fill in with the actual deployed Vercel/Render domains once known.
+      - key: WEB_URL
+        sync: false
+      - key: API_URL
+        sync: false
+      # Comma-separated exact origins for the web and admin apps (no wildcards in production).
+      - key: API_CORS_ORIGIN
+        sync: false
+      - key: MEDIA_STORAGE_PROVIDER
+        value: r2
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: news-media
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_NEWS_PUBLICATION_NAME
+        value: BD News

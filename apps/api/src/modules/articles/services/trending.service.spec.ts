@@ -122,5 +122,23 @@ describe('TrendingService', () => {
         }),
       );
     });
+
+    // Regression: the homepage's "Top stories" rail (StoryRow, via HomePage's `secondary` list) renders
+    // whichever of trending/most-read/latest happened to fill that slot — a trending article missing
+    // `media` here silently showed no thumbnail even though the same article's own page had one,
+    // because that page fetches it through a different, correctly-selected query.
+    it('selects the media relation so trending articles carry a featured-image thumbnail', async () => {
+      prisma.article.findMany.mockResolvedValue([mockArticle1]);
+
+      await service.getTrending();
+
+      expect(prisma.article.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            media: { select: { id: true, publicUrl: true, altText: true, width: true, height: true } },
+          }),
+        }),
+      );
+    });
   });
 });

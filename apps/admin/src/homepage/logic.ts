@@ -1,5 +1,5 @@
 import type { ApiIssue } from '../lib/api-error';
-import { CREATABLE_SECTION_TYPES, sectionTypeLabel } from './labels';
+import { CREATABLE_SECTION_TYPES, sectionTypeLabel, SECTION_TYPE_DEFAULT_SOURCE } from './labels';
 import type { CatalogueArticle, Draft, DraftSection, StoryArticle } from './types';
 
 /**
@@ -72,6 +72,40 @@ export function maxItemsBounds(section: Pick<DraftSection, 'type' | 'placements'
 }
 
 export const supportsCategoryLink = (type: string) => type === 'CUSTOM';
+
+export interface DefaultSourceResolution {
+  sourceType: 'CATEGORY' | 'LOCATION';
+  categoryId: string | null;
+  locationId: string | null;
+}
+
+/**
+ * A preset section type (e.g. "Bangladesh", "World") has an obvious real-world source. Without applying
+ * it automatically, an editor who picks the type and leaves "Where the stories come from" untouched gets
+ * a section titled e.g. "Bangladesh" that silently falls back to unfiltered Latest — exactly the bug
+ * reported ("I added a Bangladesh section but it's not there"): it existed, titled correctly, but wasn't
+ * scoped to Bangladesh at all. Returns null for LATEST/CUSTOM/HERO (no sensible auto-link) or when the
+ * matching category/location hasn't loaded yet — the caller falls back to MANUAL in that case rather than
+ * guessing.
+ */
+export function resolveDefaultSourceForType(
+  type: string,
+  categories: readonly { id: string; name: string; slug?: string }[] | undefined,
+  locations: readonly { id: string; name: string; slug?: string; type: string }[] | undefined,
+): DefaultSourceResolution | null {
+  const preset = SECTION_TYPE_DEFAULT_SOURCE[type];
+  if (!preset) return null;
+
+  if (preset.sourceType === 'CATEGORY') {
+    const match = categories?.find((category) => (category.slug ?? category.name.toLowerCase()) === preset.slug);
+    if (!match) return null;
+    return { sourceType: 'CATEGORY', categoryId: match.id, locationId: null };
+  }
+
+  const match = locations?.find((location) => location.type === 'COUNTRY' && (location.slug ?? location.name.toLowerCase()) === preset.slug);
+  if (!match) return null;
+  return { sourceType: 'LOCATION', categoryId: null, locationId: match.id };
+}
 
 // ------------------------------------------------------------- content sources
 
