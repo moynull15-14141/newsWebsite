@@ -6,7 +6,10 @@ services:
     region: singapore
     branch: main
     rootDir: .
-    buildCommand: npm install && npx turbo run build --filter=api
+    # --include=dev is required even though a root .npmrc also forces it: NODE_ENV=production (set
+    # below) makes npm infer omit=dev, which would otherwise skip turbo/prisma/typescript/@nestjs/cli
+    # (all devDependencies) and break this exact build with "turbo: not found".
+    buildCommand: npm install --include=dev && npx turbo run build --filter=api
     startCommand: npm run start:prod --workspace=api
     healthCheckPath: /api/v1/health
     autoDeploy: true
