@@ -1,15 +1,156 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { localizedField } from '@/lib/localize';
 import { buildSearchUrl } from '@/lib/search-url';
-import { Menu, X, Search, AlertTriangle, UserRound, Bell, ChevronDown, LogOut } from 'lucide-react';
+import { Menu, X, Search, AlertTriangle, UserRound, Bell, ChevronDown, LogOut, Sun, Moon } from 'lucide-react';
 import { useReaderAuthStore } from '@/stores/reader-auth-store';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { getHeaderControlLabels } from './header-controls';
 import { useLanguage } from '@/lib/i18n';
+import { applyTheme } from '@/lib/theme';
+
+/**
+ * The primary nav already scrolls horizontally when categories overflow (`overflow-x-auto` + `min-w-0`
+ * + `shrink-0` per link — see the comment this replaced), but with no visual cue it just looked like
+ * text getting truncated mid-word ("Sp" for "Sports"), not like a scrollable row. This adds: (1) fade
+ * gradients on whichever edge still has hidden content, so a cut-off word reads as "more this way"
+ * instead of "broken", and (2) translating a normal vertical mouse-wheel scroll into horizontal
+ * scrolling while hovered, since a plain wheel does nothing on a horizontal-only overflow container in
+ * most browsers without holding Shift — most readers would never discover that.
+ */
+function ScrollableNav({
+  navItems, isActiveNavPath, link, ariaLabel,
+}: {
+  navItems: Array<{ href: string; label: string }>;
+  isActiveNavPath: (href: string) => boolean;
+  link: (path: string) => string;
+  ariaLabel: string;
+}) {
+  const scrollRef = useRef<HTMLElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  // Continuous edge-hover auto-scroll (like a drag-and-drop scroll zone): holding the pointer over the
+  // fade zone keeps nudging the nav in that direction every frame, for as long as it stays there — not a
+  // single jump per hover. requestAnimationFrame (not setInterval) so it stays smooth and self-throttles.
+  const autoScrollDirection = useRef<0 | 1 | -1>(0);
+  const autoScrollFrame = useRef<number | null>(null);
+
+  const updateFades = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  const stopAutoScroll = () => {
+    autoScrollDirection.current = 0;
+    if (autoScrollFrame.current !== null) {
+      cancelAnimationFrame(autoScrollFrame.current);
+      autoScrollFrame.current = null;
+    }
+  };
+
+  const startAutoScroll = (direction: 1 | -1) => {
+    autoScrollDirection.current = direction;
+    if (autoScrollFrame.current !== null) return; // already running
+    const step = () => {
+      const el = scrollRef.current;
+      if (!el || autoScrollDirection.current === 0) {
+        autoScrollFrame.current = null;
+        return;
+      }
+      el.scrollLeft += autoScrollDirection.current * 8;
+      autoScrollFrame.current = requestAnimationFrame(step);
+    };
+    autoScrollFrame.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => {
+    updateFades();
+    const el = scrollRef.current;
+    if (!el) return;
+    const onResize = () => updateFades();
+    window.addEventListener('resize', onResize);
+    const observer = new ResizeObserver(onResize);
+    observer.observe(el);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      observer.disconnect();
+      stopAutoScroll();
+    };
+  }, [navItems]);
+
+  return (
+    <div className="relative hidden min-w-0 xl:block">
+      <nav
+        ref={scrollRef}
+        aria-label={ariaLabel}
+        onScroll={updateFades}
+        onWheel={(e) => {
+          if (!scrollRef.current || e.deltaY === 0) return;
+          scrollRef.current.scrollLeft += e.deltaY;
+        }}
+        className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto"
+      >
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            to={link(item.href)}
+            aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
+            className={`nav shrink-0 whitespace-nowrap rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+      {canScrollLeft && (
+        <div
+          aria-hidden="true"
+          onMouseEnter={() => startAutoScroll(-1)}
+          onMouseLeave={stopAutoScroll}
+          className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-white to-transparent"
+        />
+      )}
+      {canScrollRight && (
+        <div
+          aria-hidden="true"
+          onMouseEnter={() => startAutoScroll(1)}
+          onMouseLeave={stopAutoScroll}
+          className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent"
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Quick light/dark shortcut, always visible regardless of auth state (unlike the Bell, which is
+ * reader-only). Explicitly sets LIGHT or DARK — SYSTEM stays available from the fuller Account Settings
+ * page (apps/web/src/pages/ReaderProfileSettings.tsx), which also persists the choice server-side for a
+ * signed-in reader; this button only ever touches the shared localStorage key both read.
+ */
+function ThemeToggle() {
+  const { t } = useLanguage();
+  const [isDark, setIsDark] = useState(() => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = isDark ? 'LIGHT' : 'DARK';
+        applyTheme(next);
+        setIsDark(!isDark);
+      }}
+      className="rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-primary-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-200"
+      aria-label={isDark ? t('common.switchToLightMode') : t('common.switchToDarkMode')}
+    >
+      {isDark ? <Sun size={19} /> : <Moon size={19} />}
+    </button>
+  );
+}
 
 /**
  * Two entries are structurally special, not categories: "Latest" is the unfiltered published feed and
@@ -198,18 +339,7 @@ export default function Header() {
               scroll horizontally when categories overflow, instead of every link's text getting
               flex-shrunk down until it wraps mid-word. */}
           <div className="ml-auto flex min-w-0 items-center gap-3">
-            <nav aria-label={t('header.primaryNav')} className="no-scrollbar hidden min-w-0 items-center gap-1 overflow-x-auto xl:flex">
-              {navItems.map((item) => (
-                <Link
-                  key={item.href}
-                  to={link(item.href)}
-                  aria-current={isActiveNavPath(item.href) ? 'page' : undefined}
-                  className={`nav shrink-0 whitespace-nowrap rounded px-3 py-2 transition-colors hover:bg-neutral-100 hover:text-primary-500 ${isActiveNavPath(item.href) ? 'font-semibold text-primary-600' : 'text-neutral-700'}`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            <ScrollableNav navItems={navItems} isActiveNavPath={isActiveNavPath} link={link} ariaLabel={t('header.primaryNav')} />
 
             {/* Always-visible search field on larger screens, so it reads as "type here to search" rather
                 than a bare icon the reader has to guess at; collapses to the icon toggle below xl. */}
@@ -298,6 +428,8 @@ export default function Header() {
                   </nav>
                 </div>
               )}
+              <ThemeToggle />
+
               {user && (
                 <Link
                   to={link('/account/notifications')}
