@@ -37,7 +37,7 @@ beforeEach(() => {
 
 describe('EmployersPage — verification and suspension controls', () => {
   it('hides verify/suspend controls for a caller without those permissions', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Editor', email: 'e@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Editor', permissions: ['job.read'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Editor', email: 'e@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Editor', permissions: ['job.read'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).not.toContain('aria-label="Review verification for Acme Corp"');
     expect(markup).not.toContain('aria-label="Suspend Acme Corp"');
@@ -45,7 +45,7 @@ describe('EmployersPage — verification and suspension controls', () => {
   });
 
   it('shows a Verify action for a PENDING employer to a caller with employer.verify', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.verify'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.verify'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).toContain('aria-label="Review verification for Acme Corp"');
     useAuthStore.getState().clearAuth();
@@ -53,7 +53,7 @@ describe('EmployersPage — verification and suspension controls', () => {
 
   it('shows a Reject action instead, once the employer is already VERIFIED', () => {
     mockListQuery = () => ({ data: { data: [{ ...employer, verificationStatus: 'VERIFIED' }], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } }, isLoading: false });
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.verify'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.verify'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).toContain('aria-label="Reject verification for Acme Corp"');
     expect(markup).not.toContain('aria-label="Review verification for Acme Corp"');
@@ -61,7 +61,7 @@ describe('EmployersPage — verification and suspension controls', () => {
   });
 
   it('shows Suspend for an ACTIVE employer and Reactivate for a SUSPENDED one, to a caller with employer.suspend', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.suspend'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['employer.suspend'] }] }, 't', 'r');
     let markup = renderPage();
     expect(markup).toContain('aria-label="Suspend Acme Corp"');
     expect(markup).not.toContain('aria-label="Reactivate Acme Corp"');

@@ -106,7 +106,7 @@ describe('MediaPage — permission-aware controls', () => {
 
   it('shows Upload/Edit/Delete controls for a user with media.upload and media.manage', () => {
     useAuthStore.getState().setAuth(
-      { id: 'u1', name: 'Admin', email: 'admin@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['media.upload', 'media.manage'] }] },
+      { id: 'u1', name: 'Admin', email: 'admin@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['media.upload', 'media.manage'] }] },
       'token',
       'refresh',
     );

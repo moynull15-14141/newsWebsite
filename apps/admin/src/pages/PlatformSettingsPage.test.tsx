@@ -38,7 +38,7 @@ beforeEach(() => {
 
 describe('PlatformSettingsPage — view vs manage', () => {
   it('disables every toggle and shows a view-only notice for a caller with only platform.settings.view', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Viewer', email: 'v@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Viewer', permissions: ['platform.settings.view'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Viewer', email: 'v@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Viewer', permissions: ['platform.settings.view'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).toContain('view-only access');
     expect(markup).toContain('disabled=""');
@@ -46,7 +46,7 @@ describe('PlatformSettingsPage — view vs manage', () => {
   });
 
   it('enables the toggles for a caller with platform.settings.manage', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['platform.settings.manage'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['platform.settings.manage'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).not.toContain('view-only access');
     expect(markup).not.toContain('disabled=""');
@@ -54,7 +54,7 @@ describe('PlatformSettingsPage — view vs manage', () => {
   });
 
   it('reflects each flag’s current on/off state via aria-checked', () => {
-    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', roles: [{ id: 'r1', name: 'Admin', permissions: ['platform.settings.manage'] }] }, 't', 'r');
+    useAuthStore.getState().setAuth({ id: 'u1', name: 'Admin', email: 'a@test.local', status: 'ACTIVE', accountType: 'STAFF', roles: [{ id: 'r1', name: 'Admin', permissions: ['platform.settings.manage'] }] }, 't', 'r');
     const markup = renderPage();
     expect(markup).toContain('aria-checked="true"');
     expect(markup).toContain('aria-checked="false"');

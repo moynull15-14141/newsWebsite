@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth-store';
 import { apiFetch } from '../lib/api';
 
-interface AuthUser { id: string; name: string; email: string; status: string; roles: { id: string; name: string; permissions: string[] }[]; }
+interface AuthUser { id: string; name: string; email: string; status: string; accountType: string; roles: { id: string; name: string; permissions: string[] }[]; }
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -26,6 +26,16 @@ export default function LoginPage() {
           body: JSON.stringify({ email, password }),
         },
       );
+      // /auth/login is shared with the public reader site — valid credentials alone aren't enough to
+      // get into the admin panel. Every reader who self-registers is accountType READER (see
+      // AuthService.register); a STAFF account can only be created from inside the admin panel itself
+      // (UsersPage, permission-gated), and until Super Admin assigns it at least one role it has no
+      // permissions anyway (see useAuthStore.hasPermission) — so both checks together are exactly "only
+      // someone Super Admin explicitly approved for admin access gets in", not just anyone with a login.
+      if (data.user.accountType !== 'STAFF' || data.user.roles.length === 0) {
+        setError('This account does not have admin panel access.');
+        return;
+      }
       setAuth(data.user, data.accessToken, data.refreshToken);
       navigate('/');
     } catch (err) {

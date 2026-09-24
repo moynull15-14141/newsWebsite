@@ -12,6 +12,7 @@ interface User {
   name: string;
   email: string;
   status: string;
+  accountType: string;
   roles: UserRole[];
 }
 

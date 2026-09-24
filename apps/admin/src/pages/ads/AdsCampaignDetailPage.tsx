@@ -94,6 +94,7 @@ export default function AdsCampaignDetailPage() {
   const [editingCreative, setEditingCreative] = useState<Creative | null>(null);
   const [assignPlacementId, setAssignPlacementId] = useState('');
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const { data: campaign, isLoading } = useQuery<Campaign>({ queryKey: ['ad-campaign', id], queryFn: () => apiFetch(`/ad-campaigns/${id}`), enabled: !!id });
   const { data: placementOptions } = useQuery<PlacementOption[]>({ queryKey: ['ad-placements-all'], queryFn: () => apiFetch('/ad-placements') });
@@ -128,6 +129,15 @@ export default function AdsCampaignDetailPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ad-campaign', id] }),
   });
 
+  // Permanent, unlike Archive — the backend only allows this for DRAFT/ARCHIVED campaigns (never one
+  // that's ever gone live), so mistakes are recoverable via Archive; this is for cleaning those up for
+  // good once you're sure.
+  const deleteMutation = useMutation({
+    mutationFn: () => apiFetch(`/ad-campaigns/${id}`, { method: 'DELETE' }),
+    onSuccess: () => navigate('/ads/campaigns'),
+    onError: (err: unknown) => { setActionError(getApiErrorMessage(err, 'Delete failed')); setConfirmingDelete(false); },
+  });
+
   if (isLoading || !campaign) return <div className="text-center text-gray-500">Loading...</div>;
 
   const availablePlacements = (placementOptions ?? []).filter((p) => !campaign.placements.some((cp) => cp.placement.id === p.id));
@@ -156,9 +166,38 @@ export default function AdsCampaignDetailPage() {
               {a.label}
             </button>
           ))}
+          {(campaign.status === 'DRAFT' || campaign.status === 'ARCHIVED') && hasPermission('ads.delete') && (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+              aria-label={`Delete campaign ${campaign.name}`}
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+          )}
         </div>
       </div>
       {actionError && <p role="alert" className="mt-2 text-sm text-red-600">{actionError}</p>}
+
+      {confirmingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onKeyDown={(e) => e.key === 'Escape' && setConfirmingDelete(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-campaign-title" className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
+            <h2 id="delete-campaign-title" className="text-lg font-semibold text-gray-900">Delete "{campaign.name}"?</h2>
+            <p className="mt-2 text-sm text-gray-600">This permanently removes the campaign and its creatives. This cannot be undone.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button
+                type="button"
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
