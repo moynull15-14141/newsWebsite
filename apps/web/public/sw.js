@@ -16,5 +16,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(event.request).catch(() => caches.match('/offline.html')));
     return;
   }
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+  event.respondWith(
+    fetch(event.request).catch(
+      () => caches.match(event.request).then((cached) => cached || new Response('', { status: 503, statusText: 'Offline' })),
+    ),
+  );
 });
