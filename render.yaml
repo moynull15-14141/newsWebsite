@@ -22,10 +22,15 @@ services:
       # dashboard, never committed — see docs/DATABASE-SAFETY.md before touching this value.
       - key: DATABASE_URL
         sync: false
+      # generateValue lets Render create a strong random secret itself on first deploy (masked in the
+      # dashboard, never in this file) instead of requiring a manual paste — sync:false alone left these
+      # unset, which is exactly what caused "Missing production configuration: JWT_SECRET,
+      # JWT_REFRESH_SECRET" at boot. Still mandatory; apps/api/src/main.ts still refuses to start without
+      # them and still rejects the literal dev placeholder string.
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_EXPIRATION
         value: 15m
       - key: JWT_REFRESH_EXPIRATION
