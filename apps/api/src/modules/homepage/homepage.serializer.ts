@@ -147,6 +147,13 @@ export async function loadConfiguredSections(
       });
       return { configuration, sections };
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      // Default (5000ms) is tight enough that normal latency from an app host to a managed Postgres in
+      // a different region (e.g. Render -> Aiven) can blow it on this transaction's nested
+      // category/tag/location + placements + article include — seen in production as "Transaction
+      // already closed" 500s on /public/homepage that never reproduced locally (lower local latency).
+      timeout: 15000,
+    },
   );
 }
