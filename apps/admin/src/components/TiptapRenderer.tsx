@@ -1,5 +1,12 @@
 import React from 'react';
-import { getGalleryLayout } from '@/lib/image-gallery';
+import { getGalleryLayout } from '../lib/image-gallery';
+
+/**
+ * Mirrors apps/web/src/components/TiptapRenderer.tsx exactly (there is no shared UI package between the
+ * two apps, so keeping both copies byte-for-byte identical is what keeps the admin's article preview
+ * matching what readers will actually see). Framework-free — walks the TipTap JSON document directly, no
+ * @tiptap/react dependency needed just to render it read-only.
+ */
 
 interface TiptapMark {
   type: string;

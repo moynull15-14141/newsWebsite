@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { BarChart3, FileText, Clock, CheckCircle, AlertTriangle, Eye, TrendingUp, MessageCircle, Megaphone } from 'lucide-react';
 
@@ -65,16 +66,16 @@ export default function DashboardPage() {
   }
 
   const statCards = [
-    { label: 'Published Today', value: stats?.publishedToday ?? 0, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'Drafts', value: stats?.drafts ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50' },
-    { label: 'In Review', value: stats?.inReview ?? 0, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-    { label: 'Approved', value: stats?.approved ?? 0, icon: CheckCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Archived', value: stats?.archived ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50' },
-    { label: 'Scheduled', value: stats?.scheduled ?? 0, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Breaking News', value: stats?.breaking ?? 0, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
-    { label: 'Views Today', value: stats?.viewsToday ?? 0, icon: Eye, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: 'Approved Comments', value: engagement?.totalComments ?? 0, icon: MessageCircle, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { label: 'Active Ads', value: engagement?.activeAds ?? 0, icon: Megaphone, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: 'Published Today', value: stats?.publishedToday ?? 0, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50', to: '/articles?status=PUBLISHED' },
+    { label: 'Drafts', value: stats?.drafts ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50', to: '/articles?status=DRAFT' },
+    { label: 'In Review', value: stats?.inReview ?? 0, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50', to: '/review' },
+    { label: 'Approved', value: stats?.approved ?? 0, icon: CheckCircle, color: 'text-blue-600', bg: 'bg-blue-50', to: '/articles?status=APPROVED' },
+    { label: 'Archived', value: stats?.archived ?? 0, icon: FileText, color: 'text-gray-600', bg: 'bg-gray-50', to: '/articles?status=ARCHIVED' },
+    { label: 'Scheduled', value: stats?.scheduled ?? 0, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', to: '/articles?status=SCHEDULED' },
+    { label: 'Breaking News', value: stats?.breaking ?? 0, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', to: '/breaking-news' },
+    { label: 'Views Today', value: stats?.viewsToday ?? 0, icon: Eye, color: 'text-purple-600', bg: 'bg-purple-50', to: '/analytics' },
+    { label: 'Approved Comments', value: engagement?.totalComments ?? 0, icon: MessageCircle, color: 'text-indigo-600', bg: 'bg-indigo-50', to: '/comments' },
+    { label: 'Active Ads', value: engagement?.activeAds ?? 0, icon: Megaphone, color: 'text-orange-600', bg: 'bg-orange-50', to: '/ads' },
   ];
 
   return (
@@ -84,8 +85,32 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
       </div>
 
+      {/* Summary numbers first, detail lists below — the conventional dashboard order. 10 cards:
+          grid-cols-3 left the last one (Active Ads) alone on its own row. 10 only divides evenly by
+          1, 2, 5 or 10 — sticking to those column counts at every breakpoint means no card is ever
+          left dangling alone on a short final row. */}
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {statCards.map((card) => (
+          <Link
+            key={card.label}
+            to={card.to}
+            className="rounded-lg border border-gray-200 bg-white p-6 transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md"
+          >
+            <div className="flex items-center gap-3">
+              <div className={`rounded-lg p-2 ${card.bg}`}>
+                <card.icon className={`h-5 w-5 ${card.color}`} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">{card.label}</p>
+                <p className="text-2xl font-bold text-gray-900">{card.value}</p>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+
       {stats && (
-        <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
           <ArticlePanel title="My Drafts" articles={stats.myDrafts} />
           <ArticlePanel title="My Assigned Articles" articles={stats.myAssigned} />
           <ArticlePanel title="Recently Updated" articles={stats.recentlyUpdated} />
@@ -104,22 +129,6 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {statCards.map((card) => (
-          <div key={card.label} className="rounded-lg border border-gray-200 bg-white p-6">
-            <div className="flex items-center gap-3">
-              <div className={`rounded-lg p-2 ${card.bg}`}>
-                <card.icon className={`h-5 w-5 ${card.color}`} />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">{card.label}</p>
-                <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
 
       {stats?.mostRead && stats.mostRead.length > 0 && (
         <div className="mt-8">

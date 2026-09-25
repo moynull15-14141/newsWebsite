@@ -14,7 +14,9 @@ import CategorySelector from '../components/CategorySelector';
 import TagSelector from '../components/TagSelector';
 import SeoIntelligencePanel from '../components/SeoIntelligencePanel';
 import type { SeoAnalysis } from '@news-platform/seo';
-import { Save, Send, Check, Globe, ArrowLeft, ArrowUp, ArrowDown, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus } from 'lucide-react';
+import { Save, Send, Check, Globe, ArrowLeft, ArrowUp, ArrowDown, Image as ImageIcon, X, Clock, AlertTriangle, History, Link as LinkIcon, Languages as LanguagesIcon, Plus, Eye } from 'lucide-react';
+import ArticlePreviewModal from '../components/ArticlePreviewModal';
+import GalleryLayoutPicker from '../components/GalleryLayoutPicker';
 
 interface MediaItem {
   id: string;
@@ -157,6 +159,8 @@ export default function ArticleEditorPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const currentUserName = useAuthStore((s) => s.user?.name);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -177,11 +181,14 @@ export default function ArticleEditorPage() {
   const [locationId, setLocationId] = useState('');
   const [featuredImageId, setFeaturedImageId] = useState<string | null>(null);
   // 'featured' picks the article's featured image; 'body' inserts into the TipTap content at the
-  // cursor — same picker, same upload flow, just a different action on selection (Part 10/12).
-  const [mediaBrowserMode, setMediaBrowserMode] = useState<'featured' | 'body' | null>(null);
+  // cursor; 'gallery' multi-selects 2–4 images for a collage — same picker, same upload flow, just a
+  // different action on selection (Part 10/12; gallery added later).
+  const [mediaBrowserMode, setMediaBrowserMode] = useState<'featured' | 'body' | 'gallery' | null>(null);
   const [mediaPage, setMediaPage] = useState(1);
   const [mediaSearch, setMediaSearch] = useState('');
   const [uploadedMedia, setUploadedMedia] = useState<MediaItem | null>(null);
+  const [gallerySelection, setGallerySelection] = useState<MediaItem[]>([]);
+  const [galleryLayoutPickerOpen, setGalleryLayoutPickerOpen] = useState(false);
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
   const richTextEditorRef = useRef<RichTextEditorHandle>(null);
   const [isBreaking, setIsBreaking] = useState(false);
@@ -201,7 +208,7 @@ export default function ArticleEditorPage() {
   // Autosave / crash recovery (Phase 2L) — see buildSavePayload/handleSave for the shared save path
   // this reuses, and lib/articles.ts for why the localStorage draft is only ever offered back when it
   // still matches the server version it was made on.
-  const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error'>('idle');
+  const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'pending-live'>('idle');
   const [recoverableDraft, setRecoverableDraft] = useState<AutosaveDraft | null>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Loading an article (or first mounting a new one) populates every field one state-setter at a time —
@@ -458,6 +465,12 @@ export default function ArticleEditorPage() {
     onSuccess: (created) => navigate(`/articles/${created.id}/edit`),
   });
 
+  // Same queryKey CategorySelector uses, so this shares its cache instead of firing a second request.
+  const { data: categoriesData } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['categories'],
+    queryFn: () => apiFetch('/categories'),
+  });
+
   const { data: mediaData, isLoading: mediaLoading } = useQuery({
     queryKey: ['media', mediaPage, mediaSearch],
     queryFn: () =>
@@ -468,7 +481,9 @@ export default function ArticleEditorPage() {
     enabled: mediaBrowserMode !== null,
   });
 
-  /** Featured-image mode sets the article's image; body mode inserts into the TipTap content instead. */
+  /** Featured-image mode sets the article's image; body mode inserts into the TipTap content instead;
+   * gallery mode toggles the item in/out of a running multi-selection instead of closing immediately
+   * (see toggleGallerySelection below) — this function stays for the single-select modes only. */
   const applyMediaSelection = (media: MediaItem) => {
     if (mediaBrowserMode === 'body') {
       richTextEditorRef.current?.insertImage(media.publicUrl, media.altText ?? undefined);
@@ -477,6 +492,26 @@ export default function ArticleEditorPage() {
       setFeaturedImageId(media.id);
     }
     setMediaBrowserMode(null);
+  };
+
+  /** Gallery mode: click toggles an image in/out of the selection (max 4 — a 5th click is a no-op until
+   * something is deselected) rather than immediately inserting, since a collage needs 2–4 images picked
+   * together before a layout can even be offered. */
+  const toggleGallerySelection = (media: MediaItem) => {
+    setGallerySelection((current) => {
+      if (current.some((m) => m.id === media.id)) return current.filter((m) => m.id !== media.id);
+      if (current.length >= 4) return current;
+      return [...current, media];
+    });
+  };
+
+  const insertGallery = (layoutKey: string) => {
+    richTextEditorRef.current?.insertGallery(
+      gallerySelection.map((m) => ({ src: m.publicUrl, alt: m.altText ?? undefined })),
+      layoutKey,
+    );
+    setGalleryLayoutPickerOpen(false);
+    setGallerySelection([]);
   };
 
   const uploadMediaMutation = useMutation({
@@ -554,8 +589,20 @@ export default function ArticleEditorPage() {
   // conflict-handling path. Only fires for an already-saved article: silently retrying create() on a
   // timer would produce duplicate article rows instead of updating one, so a brand-new draft is
   // protected by the localStorage copy alone until its first manual save.
+  //
+  // Critical exception: a PUBLISHED article's PATCH endpoint updates the LIVE public page immediately —
+  // that's what "Update & Republish" means. Autosave firing that same PATCH on a timer (every edit,
+  // including one the editor was just trying out and never meant to ship) republished unfinished/test
+  // content to real readers with no explicit publish action at all. For a published article, autosave
+  // now only writes the recovery copy to localStorage (already happening in the effect below) and never
+  // calls the network PATCH — the live page keeps showing whatever was last explicitly published until
+  // the editor clicks "Update & Republish" themselves, exactly like every other status already works.
   const runAutosave = async () => {
     if (!id || !title.trim() || versionConflict) return;
+    if (article?.status === 'PUBLISHED') {
+      setAutosaveStatus('pending-live');
+      return;
+    }
     setAutosaveStatus('saving');
     try {
       await updateMutation.mutateAsync({ ...buildSavePayload(), expectedUpdatedAt: loadedUpdatedAt || undefined });
@@ -657,15 +704,24 @@ export default function ArticleEditorPage() {
             {id ? 'Edit Article' : 'New Article'}
           </h1>
           {id && (
-            <span role="status" aria-live="polite" className="text-xs text-gray-500">
+            <span role="status" aria-live="polite" className={`text-xs ${autosaveStatus === 'pending-live' ? 'font-semibold text-amber-600' : 'text-gray-500'}`}>
               {autosaveStatus === 'saving' && 'Saving…'}
               {autosaveStatus === 'dirty' && 'Unsaved changes'}
               {autosaveStatus === 'saved' && 'All changes saved'}
               {autosaveStatus === 'error' && 'Autosave failed — changes kept locally'}
+              {autosaveStatus === 'pending-live' && 'Kept locally — the live page is unchanged until you click Update & Republish'}
             </span>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Eye className="h-4 w-4" />
+            Preview
+          </button>
           <button
             onClick={() => handleSave()}
             disabled={createMutation.isPending || updateMutation.isPending}
@@ -879,6 +935,7 @@ export default function ArticleEditorPage() {
                 onChange={setContent}
                 placeholder="Write your article..."
                 onRequestImage={() => setMediaBrowserMode('body')}
+                onRequestGallery={() => { setGallerySelection([]); setMediaBrowserMode('gallery'); }}
               />
             </div>
           </div>
@@ -1426,7 +1483,9 @@ export default function ArticleEditorPage() {
           <div className="w-full max-w-3xl rounded-lg bg-white p-6 shadow-xl" style={{ maxHeight: '80vh', overflow: 'auto' }}>
             <div className="flex items-center justify-between">
               <h2 id="media-browser-title" className="text-lg font-semibold text-gray-900">
-                {mediaBrowserMode === 'body' ? 'Insert Image into Article' : 'Select Featured Image'}
+                {mediaBrowserMode === 'body' ? 'Insert Image into Article'
+                  : mediaBrowserMode === 'gallery' ? `Select 2–4 images for a gallery (${gallerySelection.length} selected)`
+                  : 'Select Featured Image'}
               </h2>
               <button onClick={() => setMediaBrowserMode(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
@@ -1476,20 +1535,53 @@ export default function ArticleEditorPage() {
               <div className="mt-8 text-center text-gray-500">No media found</div>
             ) : (
               <div className="mt-4 grid grid-cols-3 gap-3">
-                {mediaData.data.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => applyMediaSelection(item)}
-                    aria-label={`Select ${item.originalFilename}`}
-                    className="aspect-square overflow-hidden rounded-md border-2 border-transparent hover:border-primary-500 transition-colors"
-                  >
-                    <img
-                      src={item.publicUrl}
-                      alt={item.altText || item.originalFilename}
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-                ))}
+                {mediaData.data.map((item) => {
+                  if (mediaBrowserMode !== 'gallery') {
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => applyMediaSelection(item)}
+                        aria-label={`Select ${item.originalFilename}`}
+                        className="aspect-square overflow-hidden rounded-md border-2 border-transparent hover:border-primary-500 transition-colors"
+                      >
+                        <img src={item.publicUrl} alt={item.altText || item.originalFilename} className="h-full w-full object-cover" />
+                      </button>
+                    );
+                  }
+                  const selectionIndex = gallerySelection.findIndex((m) => m.id === item.id);
+                  const isSelected = selectionIndex !== -1;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => toggleGallerySelection(item)}
+                      aria-label={`${isSelected ? 'Remove' : 'Add'} ${item.originalFilename}`}
+                      aria-pressed={isSelected}
+                      className={`relative aspect-square overflow-hidden rounded-md border-2 transition-colors ${isSelected ? 'border-primary-500' : 'border-transparent hover:border-primary-300'}`}
+                    >
+                      <img src={item.publicUrl} alt={item.altText || item.originalFilename} className="h-full w-full object-cover" />
+                      {isSelected && (
+                        <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary-500 text-xs font-bold text-white shadow">
+                          {selectionIndex + 1}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {mediaBrowserMode === 'gallery' && (
+              <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-3">
+                <p className="text-sm text-gray-500">
+                  {gallerySelection.length < 2 ? 'Pick at least 2 images.' : `${gallerySelection.length} of 4 selected — order shown by number.`}
+                </p>
+                <button
+                  type="button"
+                  disabled={gallerySelection.length < 2}
+                  onClick={() => { setMediaBrowserMode(null); setGalleryLayoutPickerOpen(true); }}
+                  className="rounded-md bg-primary-500 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+                >
+                  Continue → choose layout
+                </button>
               </div>
             )}
             {mediaData?.meta && mediaData.meta.totalPages > 1 && (
@@ -1512,6 +1604,28 @@ export default function ArticleEditorPage() {
             )}
           </div>
         </div>
+      )}
+
+      {galleryLayoutPickerOpen && (
+        <GalleryLayoutPicker
+          imageCount={gallerySelection.length}
+          onSelect={insertGallery}
+          onClose={() => { setGalleryLayoutPickerOpen(false); setGallerySelection([]); }}
+        />
+      )}
+
+      {previewOpen && (
+        <ArticlePreviewModal
+          title={title}
+          excerpt={excerpt}
+          content={content}
+          categoryName={categoriesData?.find((c) => c.id === categoryId)?.name ?? null}
+          authorName={currentUserName || 'You'}
+          publishedAt={article?.publishedAt ?? null}
+          imageUrl={selectedMedia?.publicUrl}
+          imageAlt={selectedMedia?.altText}
+          onClose={() => setPreviewOpen(false)}
+        />
       )}
     </div>
   );

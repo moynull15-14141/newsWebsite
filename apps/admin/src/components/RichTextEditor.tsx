@@ -1,6 +1,9 @@
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, ReactNodeViewRenderer } from '@tiptap/react';
+import { Node } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
+import ImageNodeView from './ImageNodeView';
+import ImageGalleryNodeView from './ImageGalleryNodeView';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
 import { TextStyle } from '@tiptap/extension-text-style';
@@ -20,7 +23,7 @@ import {
   Link as LinkIcon, Unlink, ExternalLink, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Heading2, Heading3, Heading4, Pilcrow, Code, Code2, Highlighter, Palette, Superscript as SuperscriptIcon,
   Subscript as SubscriptIcon, RemoveFormatting, Indent, Table as TableIcon,
-  Trash2, X,
+  Trash2, X, LayoutGrid,
 } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
@@ -42,6 +45,50 @@ const ImageWithLayout = Image.extend({
       },
     };
   },
+  // Gives inline images a visible hover/selected delete button (see ImageNodeView) — the node was
+  // already deletable via click-then-Backspace with the stock renderer, but with zero visual affordance
+  // that was never discoverable, which is exactly the "can set an image but can't remove it" complaint.
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageNodeView);
+  },
+});
+
+/**
+ * A 2–4 image collage in one of the ready-made layouts from lib/image-gallery.ts. Deliberately its own
+ * node rather than a sequence of plain Image nodes wrapped in a div — TipTap has no generic "container"
+ * node that survives copy/paste and JSON round-tripping cleanly, and keeping the whole collage (images +
+ * chosen layout) as one atomic node is what lets ImageGalleryNodeView offer a single "change layout" /
+ * "delete" control for the group instead of the group falling apart into loose images.
+ */
+const ImageGallery = Node.create({
+  name: 'imageGallery',
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: true,
+
+  addAttributes() {
+    return {
+      layout: { default: 'TWO_EQUAL' },
+      // Array<{ src: string; alt?: string }> — TipTap attrs accept any JSON-serializable value, they
+      // just don't get their own parseHTML/renderHTML treatment beyond what's declared here.
+      images: { default: [] as { src: string; alt?: string }[] },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-image-gallery]' }];
+  },
+
+  renderHTML() {
+    // Non-interactive fallback (no NodeView mounted) — not the normal path, since both the editor and
+    // TiptapRenderer always render this node type explicitly, but required for the schema to be valid.
+    return ['div', { 'data-image-gallery': 'true' }];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageGalleryNodeView);
+  },
 });
 
 interface RichTextEditorProps {
@@ -51,16 +98,21 @@ interface RichTextEditorProps {
   /** When given, the toolbar's Image button calls this (typically to open the shared Media Library
    *  picker in "insert into body" mode) instead of falling back to the built-in URL modal. */
   onRequestImage?: () => void;
+  /** When given, the toolbar's Gallery button calls this (opens the parent's multi-select Media Library
+   *  + layout picker flow) instead of hiding the Gallery button entirely. */
+  onRequestGallery?: () => void;
 }
 
 export interface RichTextEditorHandle {
   /** Inserts a real, already-uploaded media asset at the current cursor position. */
   insertImage: (url: string, alt?: string) => void;
+  /** Inserts a 2–4 image collage using one of lib/image-gallery.ts's ready-made layouts. */
+  insertGallery: (images: { src: string; alt?: string }[], layoutKey: string) => void;
 }
 
 const READING_WPM = 200;
 
-const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({ content, onChange, placeholder, onRequestImage }, ref) {
+const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({ content, onChange, placeholder, onRequestImage, onRequestGallery }, ref) {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkNewTab, setLinkNewTab] = useState(false);
@@ -83,6 +135,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       // would still slip a level-1 heading into the body, producing a second <h1> on the public page.
       StarterKit.configure({ link: { openOnClick: false }, heading: { levels: [2, 3, 4] } }),
       ImageWithLayout,
+      ImageGallery,
       Placeholder.configure({ placeholder: placeholder || 'Start writing...' }),
       TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'] }),
       TextStyle,
@@ -126,6 +179,9 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
   useImperativeHandle(ref, () => ({
     insertImage: (url: string, alt?: string) => {
       editor?.chain().focus().setImage({ src: url, alt }).run();
+    },
+    insertGallery: (images, layoutKey) => {
+      editor?.chain().focus().insertContent({ type: 'imageGallery', attrs: { images, layout: layoutKey } }).run();
     },
   }), [editor]);
 
@@ -321,6 +377,11 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
         <ToolbarButton label="Image" onClick={openImageModal}>
           <ImageIcon className="h-4 w-4" />
         </ToolbarButton>
+        {onRequestGallery && (
+          <ToolbarButton label="Image gallery (2–4 photos)" onClick={onRequestGallery}>
+            <LayoutGrid className="h-4 w-4" />
+          </ToolbarButton>
+        )}
         <ToolbarButton
           label="Insert table"
           onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}

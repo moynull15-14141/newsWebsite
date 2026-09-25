@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getApiErrorMessage } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
@@ -41,9 +41,10 @@ const statusColors: Record<string, string> = {
 
 export default function ArticlesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || '');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [languageFilter, setLanguageFilter] = useState('');
   const queryClient = useQueryClient();
