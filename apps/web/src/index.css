@@ -300,6 +300,34 @@
   }
 }
 
+/*
+ * "Marquee" breaking-news style: one solid-color bar with a single fixed badge, and only the headline
+ * TEXT scrolls past it (as opposed to the "chips" style above, where each headline is its own colored
+ * block that scrolls as a whole). Same right-to-left, doubled-content, translateX(0% -> -50%) technique
+ * as bn-track-scroll, just applied to a plain text string instead of a row of chip elements.
+ */
+@keyframes bn-marquee-scroll {
+  from { transform: translateX(0%); }
+  to { transform: translateX(-50%); }
+}
+
+.bn-marquee-track {
+  animation-name: bn-marquee-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.bn-marquee-track:hover,
+.bn-marquee-track:focus-within {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bn-marquee-track {
+    animation: none !important;
+  }
+}
+
 /* Lets the desktop nav scroll horizontally when items overflow instead of the flex layout squeezing
    every link's text down until it wraps (see Header.tsx primary nav). */
 .no-scrollbar {

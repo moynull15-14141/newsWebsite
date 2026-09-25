@@ -108,6 +108,272 @@ function toFormState(item: BreakingNewsItem): FormState {
   };
 }
 
+type TickerStyle = 'CHIPS' | 'MARQUEE' | 'ROTATOR';
+
+interface TickerColors {
+  backgroundMode: BackgroundMode;
+  backgroundColor: string;
+  gradientStart: string | null;
+  gradientEnd: string | null;
+  gradientDirection: GradientDirection | null;
+  textColor: string;
+  badgeBackgroundColor: string;
+  badgeTextColor: string;
+}
+
+type TickerDirection = 'LTR' | 'RTL';
+
+/** Marquee-only: which way the headline crawls (see BreakingNewsService's MarqueeSettings comment). */
+interface MarqueeSettings extends TickerColors {
+  direction: TickerDirection;
+  speedMs: number;
+}
+
+/** Rotator-only: how long each headline holds before fading to the next — its own setting, independent
+ * of any item's animationSpeedMs (see BreakingNewsService's RotatorSettings comment for why). */
+interface RotatorSettings extends TickerColors {
+  holdMs: number;
+}
+
+interface TickerSettings {
+  style: TickerStyle;
+  marquee: MarqueeSettings;
+  rotator: RotatorSettings;
+}
+
+const TICKER_STYLE_OPTIONS: { value: TickerStyle; label: string; description: string }[] = [
+  { value: 'CHIPS', label: 'Chips', description: 'Each headline is its own colored block (set per item below); all active items scroll together.' },
+  { value: 'MARQUEE', label: 'Marquee', description: 'One solid-color bar with a single badge; only the headline text crawls across it. Uses its own colors below, not any item’s.' },
+  { value: 'ROTATOR', label: 'Rotator', description: 'No scrolling — one headline shown at a time, fading to the next after a few seconds. Uses its own colors below, not any item’s.' },
+];
+
+/** Small static representation of what each style looks like. Chips previews with whichever item is
+ * first in the current list (that's what it'll actually use); Marquee/Rotator preview with their own
+ * dedicated colors, since that's genuinely what will render regardless of any item's own color. */
+function StylePreviewSwatch({ style, sample, colors }: { style: TickerStyle; sample: BreakingNewsItem | undefined; colors: TickerColors }) {
+  const background = style === 'CHIPS' ? (sample ? resolveBackground(sample) : '#D32F2F') : resolveBackground(colors);
+  const textColor = style === 'CHIPS' ? (sample?.textColor ?? '#FFFFFF') : colors.textColor;
+  const badgeBg = style === 'CHIPS' ? (sample?.badgeBackgroundColor ?? '#FFFFFF') : colors.badgeBackgroundColor;
+  const badgeText = style === 'CHIPS' ? (sample?.badgeTextColor ?? '#D32F2F') : colors.badgeTextColor;
+  const headline = sample?.headline || 'A sample headline appears here';
+
+  if (style === 'ROTATOR') {
+    return (
+      <div className="flex h-8 items-center justify-center gap-2 overflow-hidden rounded px-2" style={{ background }}>
+        <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" style={{ backgroundColor: badgeBg, color: badgeText }}>News</span>
+        <span className="truncate text-xs font-medium" style={{ color: textColor }}>{headline}</span>
+      </div>
+    );
+  }
+  if (style === 'MARQUEE') {
+    return (
+      <div className="flex h-8 items-center gap-2 overflow-hidden rounded px-2" style={{ background }}>
+        <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" style={{ backgroundColor: badgeBg, color: badgeText }}>News</span>
+        <span className="truncate text-xs font-medium" style={{ color: textColor }}>{headline} &nbsp;•&nbsp; {headline}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-8 items-center gap-1 overflow-hidden rounded bg-gray-100 px-1">
+      {[sample, sample].map((_, i) => (
+        <span key={i} className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[9px]" style={{ background }}>
+          <span className="rounded px-1 py-0.5 font-bold uppercase" style={{ backgroundColor: badgeBg, color: badgeText }}>News</span>
+          <span className="max-w-16 truncate font-medium" style={{ color: textColor }}>{headline}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Inline color editor for a single style's dedicated color set (Marquee or Rotator). Deliberately the
+ * same field set/layout as the per-item dialog's color block below, so admins already familiar with that
+ * form recognize this one — but this one saves independently (its own Save button), since it isn't part
+ * of any single BreakingNews item's form. When `colors` also has `holdMs` (Rotator only — Marquee has
+ * nothing to "hold", it scrolls continuously), a duration slider is included and saved along with it. */
+function StyleColorEditor<T extends TickerColors>({ colors, onSave, saving }: { colors: T; onSave: (next: T) => void; saving: boolean }) {
+  const [draft, setDraft] = useState(colors);
+  const holdMs = 'holdMs' in draft ? (draft as unknown as RotatorSettings).holdMs : undefined;
+  const setHoldMs = (ms: number) => setDraft({ ...draft, holdMs: ms } as T);
+  const direction = 'direction' in draft ? (draft as unknown as MarqueeSettings).direction : undefined;
+  const setDirection = (d: TickerDirection) => setDraft({ ...draft, direction: d } as T);
+  const speedMs = 'speedMs' in draft ? (draft as unknown as MarqueeSettings).speedMs : undefined;
+  const setSpeedMs = (ms: number) => setDraft({ ...draft, speedMs: ms } as T);
+  const errors = [
+    ['Headline text', draft.textColor],
+    ['Badge background', draft.badgeBackgroundColor],
+    ['Badge text', draft.badgeTextColor],
+    ...(draft.backgroundMode === 'SOLID' ? [['Background color', draft.backgroundColor] as [string, string]] : []),
+    ...(draft.backgroundMode === 'GRADIENT' ? [['Gradient start', draft.gradientStart ?? ''] as [string, string], ['Gradient end', draft.gradientEnd ?? ''] as [string, string]] : []),
+  ].filter(([, value]) => !isValidHexColor(value)).map(([label]) => `${label} must be a valid hex color.`);
+
+  return (
+    <div className="mt-3 space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-1.5 text-sm text-gray-700">
+          <input type="radio" checked={draft.backgroundMode === 'SOLID'} onChange={() => setDraft({ ...draft, backgroundMode: 'SOLID' })} /> Solid
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700">
+          <input type="radio" checked={draft.backgroundMode === 'GRADIENT'} onChange={() => setDraft({ ...draft, backgroundMode: 'GRADIENT' })} /> Gradient
+        </label>
+      </div>
+      {draft.backgroundMode === 'SOLID' ? (
+        <ColorField label="Background color" value={draft.backgroundColor} onChange={(v) => setDraft({ ...draft, backgroundColor: v })} />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ColorField label="Gradient start" value={draft.gradientStart ?? ''} onChange={(v) => setDraft({ ...draft, gradientStart: v })} />
+            <ColorField label="Gradient end" value={draft.gradientEnd ?? ''} onChange={(v) => setDraft({ ...draft, gradientEnd: v })} />
+          </div>
+          <select
+            value={draft.gradientDirection ?? 'LEFT_RIGHT'}
+            onChange={(e) => setDraft({ ...draft, gradientDirection: e.target.value as GradientDirection })}
+            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          >
+            {GRADIENT_DIRECTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </>
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <ColorField label="Headline text" value={draft.textColor} onChange={(v) => setDraft({ ...draft, textColor: v })} />
+        <ColorField label="Badge background" value={draft.badgeBackgroundColor} onChange={(v) => setDraft({ ...draft, badgeBackgroundColor: v })} />
+        <ColorField label="Badge text" value={draft.badgeTextColor} onChange={(v) => setDraft({ ...draft, badgeTextColor: v })} />
+      </div>
+      {direction !== undefined && (
+        <div>
+          <span className="block text-sm font-medium text-gray-700">Scroll direction</span>
+          <div className="mt-1 flex gap-4">
+            <label className="flex items-center gap-1.5 text-sm text-gray-700">
+              <input type="radio" name="marquee-direction" checked={direction === 'RTL'} onChange={() => setDirection('RTL')} /> Right → Left (standard)
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-gray-700">
+              <input type="radio" name="marquee-direction" checked={direction === 'LTR'} onChange={() => setDirection('LTR')} /> Left → Right
+            </label>
+          </div>
+        </div>
+      )}
+      {speedMs !== undefined && (
+        <div>
+          <label htmlFor="marquee-speed" className="block text-sm font-medium text-gray-700">
+            Scroll speed: {(speedMs / 1000).toFixed(1)}s per full pass
+          </label>
+          <input
+            id="marquee-speed"
+            type="range"
+            min={3000}
+            max={60000}
+            step={1000}
+            value={speedMs}
+            onChange={(e) => setSpeedMs(Number(e.target.value))}
+            className="mt-1 block w-full"
+          />
+        </div>
+      )}
+      {holdMs !== undefined && (
+        <div>
+          <label htmlFor="rotator-hold" className="block text-sm font-medium text-gray-700">
+            Headline duration: {(holdMs / 1000).toFixed(1)}s before switching to the next
+          </label>
+          <input
+            id="rotator-hold"
+            type="range"
+            min={1000}
+            max={15000}
+            step={500}
+            value={holdMs}
+            onChange={(e) => setHoldMs(Number(e.target.value))}
+            className="mt-1 block w-full"
+          />
+        </div>
+      )}
+      {errors.length > 0 && (
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-red-700">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
+      )}
+      <button
+        type="button"
+        onClick={() => errors.length === 0 && onSave(draft)}
+        disabled={saving || errors.length > 0}
+        className="rounded-md bg-primary-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+      >
+        {saving ? 'Saving…' : 'Save colors'}
+      </button>
+    </div>
+  );
+}
+
+/** Mutually-exclusive picker for the whole banner's presentation — selecting one turns the others off,
+ * since the public site can only render one style at a time. Chips keeps each item's own colors; Marquee
+ * and Rotator each get their own dedicated color set, expandable per card, since there's no single
+ * item's color to fall back to once several differently-colored items share one bar. Reads/writes via
+ * the breaking-news module's own `/breaking-news/settings` (gated by breaking_news.manage, same as
+ * everything else on this page — not the site-wide settings.manage permission, which this role doesn't
+ * necessarily hold). */
+function TickerStylePicker({ sample }: { sample: BreakingNewsItem | undefined }) {
+  const queryClient = useQueryClient();
+  const [editingStyle, setEditingStyle] = useState<'marquee' | 'rotator' | null>(null);
+  const { data } = useQuery<TickerSettings>({
+    queryKey: ['breaking-news-ticker-settings-admin'],
+    queryFn: () => apiFetch('/breaking-news/settings'),
+  });
+  const mutation = useMutation({
+    mutationFn: (patch: Partial<TickerSettings>) => apiFetch('/breaking-news/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['breaking-news-ticker-settings-admin'] }),
+  });
+
+  if (!data) return null;
+  const active = data.style;
+
+  return (
+    <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+      <h2 className="text-sm font-semibold text-gray-900">Ticker style</h2>
+      <p className="mt-0.5 text-xs text-gray-500">Choose how the live banner presents itself on the public site. Only one style is shown at a time.</p>
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {TICKER_STYLE_OPTIONS.map((option) => {
+          const isActive = option.value === active;
+          const colorsKey = option.value === 'MARQUEE' ? 'marquee' : option.value === 'ROTATOR' ? 'rotator' : null;
+          const isEditingThis = colorsKey === editingStyle;
+          return (
+            <div
+              key={option.value}
+              className={`rounded-lg border p-3 text-left transition-colors ${
+                isActive ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              <button type="button" onClick={() => mutation.mutate({ style: option.value })} disabled={mutation.isPending} aria-pressed={isActive} className="w-full text-left disabled:opacity-60">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900">{option.label}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${isActive ? 'bg-primary-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                    {isActive ? 'On' : 'Off'}
+                  </span>
+                </div>
+                <div className="mt-2"><StylePreviewSwatch style={option.value} sample={sample} colors={option.value === 'ROTATOR' ? data.rotator : data.marquee} /></div>
+                <p className="mt-2 text-xs text-gray-500">{option.description}</p>
+              </button>
+              {colorsKey && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditingStyle(isEditingThis ? null : colorsKey)}
+                    className="mt-2 text-xs font-semibold text-primary-600 hover:underline"
+                  >
+                    {isEditingThis ? 'Hide colors' : 'Customize colors'}
+                  </button>
+                  {isEditingThis && (
+                    <StyleColorEditor
+                      colors={data[colorsKey]}
+                      saving={mutation.isPending}
+                      onSave={(next) => mutation.mutate({ [colorsKey]: next })}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Mirrors the public ticker's own single-item look (see apps/web BreakingNewsTicker) so what the admin
  * sees here is what readers will actually see — same background/gradient resolution, same badge. */
 function TickerPreview({ form }: { form: FormState }) {
@@ -263,6 +529,8 @@ export default function BreakingNewsPage() {
           <Plus className="h-4 w-4" /> New Breaking News
         </button>
       </div>
+
+      <TickerStylePicker sample={items?.[0]} />
 
       {anyError && (
         <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

@@ -240,4 +240,103 @@ export class BreakingNewsService {
       };
     });
   }
+
+  // ------------------------------------------------------------------ ticker style (presentation)
+  //
+  // How the whole banner renders (chips / marquee / rotator) is a single global choice, stored as a
+  // plain PlatformSetting row (the same generic key/value store EditorialService and
+  // PlatformSettingsService each already use for their own, differently-scoped allowlists) rather than
+  // a new table, gated by this module's own `breaking_news.manage` permission (not the site-wide
+  // `settings.manage`, which the Admin role here doesn't hold).
+  //
+  // Chips keeps each BreakingNews row's own colors (that is what they're for). Marquee and Rotator each
+  // have exactly ONE bar/badge on screen at a time with no natural "whose color wins" answer when
+  // several items are active with different colors — so each gets its own dedicated color set, stored
+  // here rather than derived from any one item. Headlines/links for those two styles still come from
+  // whichever items are currently active; only the coloring is decoupled from the individual items.
+
+  async getTickerSettings(): Promise<TickerSettings> {
+    const row = await this.prisma.platformSetting.findUnique({ where: { key: TICKER_SETTINGS_KEY } });
+    const stored = (row?.value ?? {}) as Partial<TickerSettings>;
+    const style = typeof stored.style === 'string' && (TICKER_STYLES as readonly string[]).includes(stored.style) ? (stored.style as TickerStyle) : 'CHIPS';
+    return {
+      style,
+      marquee: { ...DEFAULT_TICKER_COLORS, direction: DEFAULT_MARQUEE_DIRECTION, speedMs: DEFAULT_MARQUEE_SPEED_MS, ...stored.marquee },
+      rotator: { ...DEFAULT_TICKER_COLORS, holdMs: DEFAULT_ROTATOR_HOLD_MS, ...stored.rotator },
+    };
+  }
+
+  async updateTickerSettings(patch: Partial<TickerSettings>, updatedById: string): Promise<TickerSettings> {
+    const current = await this.getTickerSettings();
+    const next: TickerSettings = {
+      style: patch.style ?? current.style,
+      marquee: patch.marquee ? { ...current.marquee, ...patch.marquee } : current.marquee,
+      rotator: patch.rotator ? { ...current.rotator, ...patch.rotator } : current.rotator,
+    };
+    await this.prisma.platformSetting.upsert({
+      where: { key: TICKER_SETTINGS_KEY },
+      update: { value: next as any, updatedById },
+      create: { key: TICKER_SETTINGS_KEY, value: next as any, updatedById },
+    });
+    return next;
+  }
 }
+
+const TICKER_SETTINGS_KEY = 'breakingNewsTickerSettings';
+export const TICKER_STYLES = ['CHIPS', 'MARQUEE', 'ROTATOR'] as const;
+export type TickerStyle = (typeof TICKER_STYLES)[number];
+
+export interface TickerColors {
+  backgroundMode: 'SOLID' | 'GRADIENT';
+  backgroundColor: string;
+  gradientStart: string | null;
+  gradientEnd: string | null;
+  gradientDirection: 'LEFT_RIGHT' | 'RIGHT_LEFT' | 'TOP_BOTTOM' | 'BOTTOM_TOP' | 'DIAGONAL' | null;
+  textColor: string;
+  badgeBackgroundColor: string;
+  badgeTextColor: string;
+}
+
+/** Marquee-only: which way the headline text crawls. RTL (right edge in, left edge out) is the standard
+ * news-ticker convention and the default; LTR is offered because some admins specifically want the
+ * reversed motion (e.g. to match a brand's existing marquee elsewhere on the site). */
+export const TICKER_DIRECTIONS = ['LTR', 'RTL'] as const;
+export type TickerDirection = (typeof TICKER_DIRECTIONS)[number];
+
+/** Marquee-only: how long one full pass of the crawling text takes. Its own setting, not derived from
+ * any item's animationSpeedMs — that field was designed for the Chips style (each chip's own pace), and
+ * summing several different items' speeds together made the marquee's pace an accident of how many
+ * items happened to be active rather than a deliberate choice (same reasoning as Rotator's holdMs). */
+export interface MarqueeSettings extends TickerColors {
+  direction: TickerDirection;
+  speedMs: number;
+}
+
+/** Rotator-only: how long each headline holds before fading to the next. Not on the shared TickerColors
+ * shape — Marquee has nothing to "hold", it scrolls continuously — and deliberately not derived from any
+ * item's own animationSpeedMs (that field means "how fast to scroll", which items were configured with
+ * Chips/Marquee in mind, not "how long to display standing still"; same reasoning as colors above). */
+export interface RotatorSettings extends TickerColors {
+  holdMs: number;
+}
+
+export interface TickerSettings {
+  style: TickerStyle;
+  marquee: MarqueeSettings;
+  rotator: RotatorSettings;
+}
+
+const DEFAULT_TICKER_COLORS: TickerColors = {
+  backgroundMode: 'SOLID',
+  backgroundColor: '#D32F2F',
+  gradientStart: null,
+  gradientEnd: null,
+  gradientDirection: null,
+  textColor: '#FFFFFF',
+  badgeBackgroundColor: '#FFFFFF',
+  badgeTextColor: '#D32F2F',
+};
+
+const DEFAULT_ROTATOR_HOLD_MS = 4000;
+const DEFAULT_MARQUEE_DIRECTION: TickerDirection = 'RTL';
+const DEFAULT_MARQUEE_SPEED_MS = 18000;
